@@ -1,5 +1,5 @@
-import config from '../aleph.config.json' with { type: 'json' };
-import { createRuntimeNotesApi } from '../src/notes-api.mjs';
+import config from '../../aleph.config.json' with { type: 'json' };
+import { createRuntimeNotesApi } from '../../src/notes-api.mjs';
 
 let api;
 export default async function handler(request, response) {
@@ -10,5 +10,5 @@ export default async function handler(request, response) {
     response.status(500).json({ error: 'SERVER_NOT_CONFIGURED' });
     return;
   }
-  await api.collection(request, response);
+  await api.item(request, response);
 }

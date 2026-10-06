@@ -28,9 +28,12 @@ test('build identity uses Vercel Git and deployment metadata', () => {
     publicAppUrl: 'https://student-defense-123.vercel.app',
     judgeIssuer: config.judgeIssuer,
     sampleMarker: config.sampleMarker,
+    originalApiUrl: config.originalApiUrl,
   });
   assert.throws(() => deploymentIdentity({ ...env, VERCEL_GIT_PROVIDER: undefined }, config));
   assert.throws(() => deploymentIdentity({ ...env, VERCEL_GIT_COMMIT_SHA: 'short' }, config));
+  assert.throws(() => deploymentIdentity(env, { ...config, originalApiUrl: null }));
+  assert.throws(() => deploymentIdentity(env, { ...config, originalApiUrl: 'https://abcdefgh.supabase.co/rest/v1/notes?select=*' }));
 });
 
 test('attack check records closed results only when requests are rejected as JSON', async () => {

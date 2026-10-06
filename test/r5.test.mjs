@@ -10,6 +10,7 @@ const config = {
   publicAppUrl: 'https://student-defense.vercel.app',
   identityProvider: { issuer: 'https://abcdefgh.supabase.co/auth/v1' },
   originalApiUrl: 'https://abcdefgh.supabase.co/rest/v1/notes',
+  allowedRoutes: ['GET /api/notes', 'POST /api/notes'],
 };
 const env = {
   VERCEL_GIT_PROVIDER: 'github',
@@ -29,10 +30,13 @@ test('build identity uses Vercel Git and deployment metadata', () => {
     judgeIssuer: config.judgeIssuer,
     sampleMarker: config.sampleMarker,
     originalApiUrl: config.originalApiUrl,
+    allowedRoutes: config.allowedRoutes,
   });
   assert.throws(() => deploymentIdentity({ ...env, VERCEL_GIT_PROVIDER: undefined }, config));
   assert.throws(() => deploymentIdentity({ ...env, VERCEL_GIT_COMMIT_SHA: 'short' }, config));
   assert.throws(() => deploymentIdentity(env, { ...config, originalApiUrl: null }));
+  assert.throws(() => deploymentIdentity(env, { ...config, allowedRoutes: [] }));
+  assert.throws(() => deploymentIdentity(env, { ...config, allowedRoutes: undefined }));
   assert.throws(() => deploymentIdentity(env, { ...config, originalApiUrl: 'https://abcdefgh.supabase.co/rest/v1/notes?select=*' }));
 });
 

@@ -67,7 +67,7 @@
 - 브라우저는 Supabase를 직접 부르지 않습니다. 메모 읽기·추가·수정·삭제는 이미 `/api/notes` 서버 함수만 거치고, 5단계에서 로그인도 서버 함수 `/api/auth/login`·`/api/auth/refresh`·`/api/auth/logout`(`api/auth/[action].js`, 로직은 `src/auth-api.mjs`)로 옮겼습니다. 로그인 요청마다 새 서버 클라이언트를 만들고, 브라우저에는 토큰과 이메일만 돌려줍니다.
 - 그래서 화면 파일에서 Supabase 공개 키와 SDK를 없앴습니다. `public/auth-config.json`을 삭제했고, `npm run build`는 더 이상 `public/supabase.js`를 만들지 않습니다. 키는 Vercel 환경변수(`SUPABASE_URL`, `SUPABASE_SECRET_KEY`)로 서버 함수만 읽습니다.
 - 화면은 로그인 결과(토큰)를 그 탭의 `sessionStorage`에 두고 `Authorization: Bearer`로 `/api/notes`를 부릅니다. 401이면 한 번 갱신을 시도하고, 실패하면 로그인 화면으로 돌아갑니다. 서버의 로그인 확인과 소유자 검사(4단계)는 그대로입니다.
-- 원본 자료 API: `aleph.config.json`의 `originalApiUrl`에 `…/rest/v1/notes`(질의 없는 HTTPS 경로)를 적었고, 빌드가 만드는 배포 식별 파일 `/aleph.json`에도 같은 값(`originalApiUrl`)을 넣습니다. 심판은 배포된 `/aleph.json`을 읽기 때문입니다.
+- 원본 자료 API: `aleph.config.json`의 `originalApiUrl`에 `…/rest/v1/notes`(질의 없는 HTTPS 경로)를 적었고, 빌드가 만드는 배포 식별 파일 `/aleph.json`에도 같은 값(`originalApiUrl`)과 허용 경로(`allowedRoutes`)를 넣습니다. 심판은 배포된 `/aleph.json`을 읽기 때문입니다.
 - 마지막 방어선: `supabase/revoke-stage5.sql`이 `public.notes`에서 `public`·`anon`·`authenticated`의 직접 권한을 모두 회수합니다. 점검 SQL은 `supabase/revoke-stage5-check.sql`(읽기만 함)이며 적용 전·후에 실행해 비교합니다. 이 SQL은 학생이 학습용 Supabase SQL Editor에서 직접 실행합니다(이 저장소 작업에서는 실행하지 않았습니다).
 - 시험: `npm run test:auth`(로그인 서버 함수), `npm run test:r5`, `npm run test:notes`, `npm run test:package`.
 - `src/attack-check.mjs`(`npm run bundle`의 자기 점검): 비로그인 목록·추가·한 건 조회, 위조 토큰, 키 없이 원본 API 조회·추가, 첫 화면의 키 문자열과 예전 키 파일(`/auth-config.json`, `/supabase.js`) 404, 틀린 로그인 거부, `/data.json` 404, `/aleph.json` 열림, `nosniff`를 실제로 보낸 결과만 적습니다. 심판의 판정이 아닙니다.

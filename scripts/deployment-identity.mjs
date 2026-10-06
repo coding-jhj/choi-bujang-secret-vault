@@ -17,10 +17,12 @@ export function deploymentIdentity(env, config) {
       || !/^https:\/\/[a-z0-9-]+\.up\.railway\.app\/defense\/judge$/iu.test(config.judgeIssuer)
       || typeof config.sampleMarker !== 'string'
       || !/^[A-Z0-9_]{1,80}$/u.test(config.sampleMarker)
-      || (config.step >= 5 && !/^https:\/\/[^\s?#]+$/u.test(config.originalApiUrl ?? ''))) {
+      || (config.step >= 5 && !/^https:\/\/[^\s?#]+$/u.test(config.originalApiUrl ?? ''))
+      || (config.step >= 5 && !(Array.isArray(config.allowedRoutes) && config.allowedRoutes.length > 0
+        && config.allowedRoutes.every(route => typeof route === 'string' && /^[A-Z]+ \/\S*$/u.test(route))))) {
     throw new Error('배포 식별 정보를 확인할 수 없습니다. Vercel 시스템 환경변수와 1단계 시작 틀을 확인하세요.');
   }
-  const original = config.step >= 5 ? { originalApiUrl: config.originalApiUrl } : {};
+  const original = config.step >= 5 ? { originalApiUrl: config.originalApiUrl, allowedRoutes: config.allowedRoutes } : {};
   return {
     schema: 'aleph.defense.deployment.v1',
     step: config.step,

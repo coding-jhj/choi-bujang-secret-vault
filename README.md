@@ -49,3 +49,4 @@
 - Supabase 표 id는 UUID입니다. 2단계 표는 `supabase/migrate-stage3.sql`로 바꿉니다.
 - **한계: 로그인은 신원 확인일 뿐입니다.** `GET·PUT·DELETE /api/notes/:id`는 아직 소유자 검사를 하지 않아 로그인한 다른 사람이 id를 알면 남의 메모를 읽고 고칠 수 있습니다. 4단계에서 막습니다. 예전 공개 커밋과 배포에 남은 옛 `data.json`은 여전히 해결되지 않았습니다.
 - 확인하지 못한 것: 만료·다른 서비스용 토큰을 실제로 보낸 시험은 하지 않았고, 서명 검증은 `src/verify-login.mjs`의 `jose`·Supabase 검증에 맡깁니다.
+- 다시 실행하는 방법: `npm run test:notes`, `npm run test:r5`, `npm run test:package`. 배포 뒤에는 로그인 없이 `/api/notes`를 요청해 `401`과 JSON 오류가 오는지, `/aleph.json`이 열리는지, `/data.json`이 404인지 봅니다. 2026-10-06 배포 주소에서 위 세 가지와 가짜 토큰 `401`을 curl로 확인했습니다. 로그인 후 추가·수정·삭제는 아직 브라우저에서 확인하지 않았습니다.

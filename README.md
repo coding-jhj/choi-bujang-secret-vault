@@ -43,7 +43,7 @@
 
 ## 3단계: 진짜 로그인을 붙였습니다
 
-- 화면(`public/index.html`)은 Supabase Auth 공식 SDK(`public/supabase.js`, 빌드 때 `node_modules`에서 복사)로 이메일·비밀번호 로그인과 로그아웃을 합니다. 화면 설정 `public/auth-config.json`에는 공개용 Project URL과 publishable key만 둡니다. 비밀번호와 토큰을 직접 만들지 않습니다.
+- (5단계에서 서버 로그인으로 바꿨습니다.) 3단계 당시 화면(`public/index.html`)은 Supabase Auth 공식 SDK(`public/supabase.js`, 빌드 때 `node_modules`에서 복사)로 이메일·비밀번호 로그인과 로그아웃을 합니다. 화면 설정 `public/auth-config.json`에는 공개용 Project URL과 publishable key만 둡니다. 비밀번호와 토큰을 직접 만들지 않습니다.
 - 서버 API(`api/notes.js`, `api/notes/[id].js`)는 요청마다 `Authorization: Bearer` 토큰을 `src/verify-login.mjs`로 검사합니다. 토큰이 없거나, 서명이 틀리거나, 만료됐거나, 발급자·대상이 다르면 `401`과 JSON `{"error":"LOGIN_REQUIRED"}`로 거부합니다. 브라우저가 보낸 사용자 번호·역할은 믿지 않고, 토큰에서 서버가 확인한 사용자 ID만 씁니다.
 - 경로: `GET /api/notes`(내 메모 배열), `POST /api/notes`(`{title,body}` → `{id}`), `GET·PUT·DELETE /api/notes/:id`(`{id,title,body}`, 지운 뒤 GET은 404). 메모를 추가할 때 확인된 사용자 ID를 `owner_id`로 저장합니다. 허용 경로는 `aleph.config.json`의 `allowedRoutes`에 적었습니다.
 - Supabase 표 id는 UUID입니다. 2단계 표는 `supabase/migrate-stage3.sql`로 바꿉니다.
@@ -61,3 +61,15 @@
 - `src/attack-check.mjs`(`npm run bundle`이 실행하는 자기 점검)는 실제 배포 주소로 비로그인 목록·추가·한 건 조회, 위조 토큰, 비로그인 DB 직접 조회, `/data.json` 404, `/aleph.json` 열림, `nosniff` 헤더를 보내 결과만 기록합니다. 심판의 판정이 아닙니다.
 - 한계: 예전 공개 커밋과 예전 배포에 남은 옛 `data.json`은 여전히 해결되지 않았습니다.
 - 다시 실행하는 방법: `npm run test:notes`, `npm run test:r5`, `npm run test:package`.
+
+## 5단계: 자료 요청을 서버 한곳으로 모았습니다
+
+- 브라우저는 Supabase를 직접 부르지 않습니다. 메모 읽기·추가·수정·삭제는 이미 `/api/notes` 서버 함수만 거치고, 5단계에서 로그인도 서버 함수 `/api/auth/login`·`/api/auth/refresh`·`/api/auth/logout`(`api/auth/[action].js`, 로직은 `src/auth-api.mjs`)로 옮겼습니다. 로그인 요청마다 새 서버 클라이언트를 만들고, 브라우저에는 토큰과 이메일만 돌려줍니다.
+- 그래서 화면 파일에서 Supabase 공개 키와 SDK를 없앴습니다. `public/auth-config.json`을 삭제했고, `npm run build`는 더 이상 `public/supabase.js`를 만들지 않습니다. 키는 Vercel 환경변수(`SUPABASE_URL`, `SUPABASE_SECRET_KEY`)로 서버 함수만 읽습니다.
+- 화면은 로그인 결과(토큰)를 그 탭의 `sessionStorage`에 두고 `Authorization: Bearer`로 `/api/notes`를 부릅니다. 401이면 한 번 갱신을 시도하고, 실패하면 로그인 화면으로 돌아갑니다. 서버의 로그인 확인과 소유자 검사(4단계)는 그대로입니다.
+- 원본 자료 API: `aleph.config.json`의 `originalApiUrl`에 `…/rest/v1/notes`(질의 없는 HTTPS 경로)를 적었습니다.
+- 마지막 방어선: `supabase/revoke-stage5.sql`이 `public.notes`에서 `public`·`anon`·`authenticated`의 직접 권한을 모두 회수합니다. 점검 SQL은 `supabase/revoke-stage5-check.sql`(읽기만 함)이며 적용 전·후에 실행해 비교합니다. 이 SQL은 학생이 학습용 Supabase SQL Editor에서 직접 실행합니다(이 저장소 작업에서는 실행하지 않았습니다).
+- 시험: `npm run test:auth`(로그인 서버 함수), `npm run test:r5`, `npm run test:notes`, `npm run test:package`.
+- `src/attack-check.mjs`(`npm run bundle`의 자기 점검): 비로그인 목록·추가·한 건 조회, 위조 토큰, 키 없이 원본 API 조회·추가, 첫 화면의 키 문자열과 예전 키 파일(`/auth-config.json`, `/supabase.js`) 404, 틀린 로그인 거부, `/data.json` 404, `/aleph.json` 열림, `nosniff`를 실제로 보낸 결과만 적습니다. 심판의 판정이 아닙니다.
+- 확인하지 못한 것: 공개 키를 화면에서 없앴기 때문에 "공개 키 + 로그인 토큰으로 원본 API 직접 조회·수정"은 자기 점검이 보내지 않습니다(미실행). 새 서버 로그인과 SQL 적용 뒤의 브라우저 동작은 학생이 직접 확인해야 합니다.
+- 한계: 로그인 요청이 서버(Vercel)에서 나가므로 Supabase의 로그인 횟수 제한이 접속자 전체에 같이 걸릴 수 있습니다. 예전 공개 커밋과 배포에 남은 옛 `data.json`과 공개 키는 그대로 남아 있습니다.

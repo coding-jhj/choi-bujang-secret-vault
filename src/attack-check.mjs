@@ -16,25 +16,34 @@ const rejected = ({ status, json }) => closedStatus(status) && json
   ? `거부됨 (HTTP ${status}, JSON 오류 문구)`
   : `거부 조건을 만족하지 않음 (HTTP ${status}, JSON ${json ? '맞음' : '아님'})`;
 
-// 공개용 값(Project URL, publishable key)만 읽어, 로그인 없이 Data API를 직접 부른다.
-async function anonDataApiRead(app, config) {
+// 원본 자료 API 주소는 설정 파일의 값을 쓴다. 공개 키가 화면에 없으므로 키 없이 보낸 요청만 시험한다.
+function originalApi(config) {
+  const base = new URL(config.originalApiUrl);
+  const issuerHost = new URL(config.identityProvider.issuer).hostname;
+  if (base.protocol !== 'https:' || base.hostname !== issuerHost || base.search || base.hash) {
+    throw new Error('aleph.config.json의 originalApiUrl을 확인해 주세요.');
+  }
+  return base;
+}
+
+const KEY_PATTERN = /sb_(?:publishable|secret)_[A-Za-z0-9_-]{8,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{8,}/u;
+
+async function publicFilesKeyScan(url) {
   try {
-    const published = await (await fetch(new URL('/auth-config.json', app), {
-      redirect: 'error', signal: AbortSignal.timeout(10000) })).json();
-    const base = new URL(published.supabaseUrl);
-    const issuerHost = new URL(config.identityProvider.issuer).hostname;
-    if (base.protocol !== 'https:' || base.hostname !== issuerHost
-        || typeof published.publishableKey !== 'string') return '점검하지 못함 (공개 설정을 읽을 수 없음)';
-    const result = await probe(new URL('/rest/v1/notes?select=id', base), {
-      headers: { apikey: published.publishableKey, Authorization: `Bearer ${published.publishableKey}` } });
-    return rejected(result);
+    const page = await fetch(url('/'), { redirect: 'error', signal: AbortSignal.timeout(10000) });
+    const html = await page.text();
+    const old = await Promise.all(['/auth-config.json', '/supabase.js']
+      .map(path => probe(url(path))));
+    if (KEY_PATTERN.test(html)) return '키로 보이는 문자열이 첫 화면에 있음';
+    if (old.some(item => item.status !== 404)) return '예전 키 파일이 열릴 수 있음';
+    return '키 문자열 없음 (첫 화면 검사, 예전 키 파일 404)';
   } catch {
     return '점검하지 못함 (요청 실패)';
   }
 }
 
 export async function runAttackChecks(config) {
-  if (config.step !== 4) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
+  if (config.step !== 5) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   let app;
   try {
     app = new URL(config.publicAppUrl);
@@ -63,9 +72,22 @@ export async function runAttackChecks(config) {
   for (const [attackId, expected, send] of checks) {
     results.push({ attackId, expected, observed: rejected(await send()) });
   }
-  results.push({ attackId: 'anon_data_api_read',
-    expected: '로그인 없이 DB 직접 조회가 401/403과 JSON으로 거부됨',
-    observed: await anonDataApiRead(app, config) });
+  const original = originalApi(config);
+  results.push({ attackId: 'original_api_no_key_read',
+    expected: '키 없이 원본 DB 직접 조회가 401/403과 JSON으로 거부됨',
+    observed: await probe(new URL('?select=id', original)).then(rejected, () => '점검하지 못함 (요청 실패)') });
+  results.push({ attackId: 'original_api_no_key_write',
+    expected: '키 없이 원본 DB 직접 추가가 401/403과 JSON으로 거부됨',
+    observed: await probe(original, { method: 'POST', headers: json, body: '{}' })
+      .then(rejected, () => '점검하지 못함 (요청 실패)') });
+  results.push({ attackId: 'public_files_no_key',
+    expected: '첫 화면과 공개 파일에 Supabase 키 문자열이 없음',
+    observed: await publicFilesKeyScan(url) });
+  results.push({ attackId: 'login_bad_credentials',
+    expected: '틀린 로그인 정보가 서버 로그인 경로에서 401/403과 JSON으로 거부됨',
+    observed: await probe(url('/api/auth/login'), { method: 'POST', headers: json,
+      body: JSON.stringify({ email: 'no-such-user@example.invalid', password: 'not-a-real-password' }) })
+      .then(rejected, () => '점검하지 못함 (요청 실패)') });
   const data = await probe(url('/data.json'));
   results.push({ attackId: 'public_data_json_read', expected: '/data.json이 열리지 않음',
     observed: data.status === 404 ? '열리지 않음 (HTTP 404)' : `열릴 수 있음 (HTTP ${data.status})` });

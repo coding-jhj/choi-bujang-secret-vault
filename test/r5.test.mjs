@@ -4,7 +4,7 @@ import { deploymentIdentity } from '../scripts/deployment-identity.mjs';
 import { runAttackChecks } from '../src/attack-check.mjs';
 
 const config = {
-  step: 2,
+  step: 3,
   judgeIssuer: 'https://aleph-judge-production.up.railway.app/defense/judge',
   sampleMarker: 'SAMPLE_NOTE_1',
   publicAppUrl: 'https://student-defense.vercel.app',
@@ -20,7 +20,7 @@ const env = {
 test('build identity uses Vercel Git and deployment metadata', () => {
   assert.deepEqual(deploymentIdentity(env, config), {
     schema: 'aleph.defense.deployment.v1',
-    step: 2,
+    step: 3,
     repoUrl: 'https://github.com/student-a/aleph-defense',
     commit: 'a'.repeat(40),
     publicAppUrl: 'https://student-defense-123.vercel.app',
@@ -31,23 +31,23 @@ test('build identity uses Vercel Git and deployment metadata', () => {
   assert.throws(() => deploymentIdentity({ ...env, VERCEL_GIT_COMMIT_SHA: 'short' }, config));
 });
 
-test('attack check reports memos closed when public data.json has none', async () => {
+test('attack check records closed results only when requests are rejected as JSON', async () => {
   const originalFetch = globalThis.fetch;
-  let requestUrl;
-  let options;
+  const urls = [];
   try {
     globalThis.fetch = async (url, init) => {
-      requestUrl = String(url);
-      options = init;
-      return new Response('Not Found', { status: 404 });
+      urls.push([String(url), init?.method ?? 'GET', init?.redirect]);
+      return String(url).endsWith('/data.json') ? new Response('Not Found', { status: 404 })
+        : new Response(JSON.stringify({ error: 'LOGIN_REQUIRED' }), { status: 401 });
     };
-    const [closed] = await runAttackChecks(config);
-    assert.equal(requestUrl, 'https://student-defense.vercel.app/data.json');
-    assert.equal(options.redirect, 'error');
-    assert.match(closed.observed, /0건/u);
-    globalThis.fetch = async () => new Response(JSON.stringify({ notes: [{ title: '가상' }] }), { status: 200 });
-    const [open] = await runAttackChecks(config);
-    assert.match(open.observed, /1건이 보임/u);
+    const results = await runAttackChecks(config);
+    assert.deepEqual(results.map(item => item.attackId),
+      ['no_login_list', 'no_login_create', 'forged_token_list', 'public_data_json_read']);
+    assert.ok(results.every(item => /거부됨|열리지 않음/u.test(item.observed)));
+    assert.ok(urls.every(([, , redirect]) => redirect === 'error'));
+    globalThis.fetch = async () => new Response(JSON.stringify([{ id: 'x' }]), { status: 200 });
+    const open = await runAttackChecks(config);
+    assert.ok(open.every(item => /않음|열릴 수/u.test(item.observed)));
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -29,7 +29,7 @@
 - 가상 메모는 Supabase 표 `public.notes`에 있습니다. 표 만들기는 `supabase/schema.sql`입니다. `owner_id uuid` 칸이 있고(`auth.users` 연결 없음), 행 수준 보안(RLS)을 켰으며, `anon`·`authenticated` 역할의 모든 권한을 회수했습니다. 메모 본문은 저장소에 넣지 않았습니다.
 - 공개 `data.json`은 저장소와 배포 결과물에서 삭제했고, `npm run build`는 더 이상 복사하지 않습니다. 배포 식별 파일 `public/aleph.json` 생성은 그대로 유지합니다.
 - `api/notes.js` 서버 함수가 환경변수 `SUPABASE_URL`과 서버 전용 `SUPABASE_SECRET_KEY`로 메모를 읽습니다. 이 값은 Vercel 설정 화면에만 넣고 브라우저 파일·응답·로그·Git에 넣지 않습니다.
-- **한계: `/api/notes`는 3단계에서 로그인 확인을 붙이기 전까지 로그인 없이 누구나 호출할 수 있는 공개 API입니다.** 메모를 코드 밖으로 옮긴 것이지, 접근을 막은 것이 아닙니다.
+- 한계(2단계 당시): `/api/notes`는 로그인 확인이 없는 공개 API였습니다. 3단계에서 로그인 확인을 붙였습니다.
 - `vercel.json`이 모든 응답에 `X-Content-Type-Options: nosniff`를 붙입니다.
 
 ### 가상 메모 문장이 남았는지 찾는 방법
@@ -40,3 +40,12 @@
 - 현재 배포: 배포 주소의 `/`, `/data.json`(404여야 함), `/aleph.json`을 열어 같은 문장이 있는지 봅니다.
 
 **예전 공개 커밋과 예전 배포는 그대로 남아 있습니다.** Git 기록과 지난 배포 주소에는 옛 `data.json`이 아직 보일 수 있으므로, 이 단계로 과거 노출이 해결되었다고 말하지 않습니다.
+
+## 3단계: 진짜 로그인을 붙였습니다
+
+- 화면(`public/index.html`)은 Supabase Auth 공식 SDK(`public/supabase.js`, 빌드 때 `node_modules`에서 복사)로 이메일·비밀번호 로그인과 로그아웃을 합니다. 화면 설정 `public/auth-config.json`에는 공개용 Project URL과 publishable key만 둡니다. 비밀번호와 토큰을 직접 만들지 않습니다.
+- 서버 API(`api/notes.js`, `api/notes/[id].js`)는 요청마다 `Authorization: Bearer` 토큰을 `src/verify-login.mjs`로 검사합니다. 토큰이 없거나, 서명이 틀리거나, 만료됐거나, 발급자·대상이 다르면 `401`과 JSON `{"error":"LOGIN_REQUIRED"}`로 거부합니다. 브라우저가 보낸 사용자 번호·역할은 믿지 않고, 토큰에서 서버가 확인한 사용자 ID만 씁니다.
+- 경로: `GET /api/notes`(내 메모 배열), `POST /api/notes`(`{title,body}` → `{id}`), `GET·PUT·DELETE /api/notes/:id`(`{id,title,body}`, 지운 뒤 GET은 404). 메모를 추가할 때 확인된 사용자 ID를 `owner_id`로 저장합니다. 허용 경로는 `aleph.config.json`의 `allowedRoutes`에 적었습니다.
+- Supabase 표 id는 UUID입니다. 2단계 표는 `supabase/migrate-stage3.sql`로 바꿉니다.
+- **한계: 로그인은 신원 확인일 뿐입니다.** `GET·PUT·DELETE /api/notes/:id`는 아직 소유자 검사를 하지 않아 로그인한 다른 사람이 id를 알면 남의 메모를 읽고 고칠 수 있습니다. 4단계에서 막습니다. 예전 공개 커밋과 배포에 남은 옛 `data.json`은 여전히 해결되지 않았습니다.
+- 확인하지 못한 것: 만료·다른 서비스용 토큰을 실제로 보낸 시험은 하지 않았고, 서명 검증은 `src/verify-login.mjs`의 `jose`·Supabase 검증에 맡깁니다.

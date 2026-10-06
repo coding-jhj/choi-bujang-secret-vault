@@ -13,9 +13,9 @@ function memoryStore() {
   return {
     async list(owner) { return [...rows.values()].filter(r => r.owner === owner).map(({ owner: _o, ...n }) => n); },
     async create(owner, { title, body }) { const key = id(); rows.set(key, { id: key, owner, title, body }); return key; },
-    async get(key) { const r = rows.get(key); return r ? { id: r.id, title: r.title, body: r.body } : null; },
-    async update(key, { title, body }) { const r = rows.get(key); if (!r) return null; Object.assign(r, { title, body }); return { id: r.id, title, body }; },
-    async remove(key) { return rows.delete(key); },
+    async get(owner, key) { const r = rows.get(key); return r && r.owner === owner ? { id: r.id, title: r.title, body: r.body } : null; },
+    async update(owner, key, { title, body }) { const r = rows.get(key); if (!r || r.owner !== owner) return null; Object.assign(r, { title, body }); return { id: r.id, title, body }; },
+    async remove(owner, key) { const r = rows.get(key); return r && r.owner === owner ? rows.delete(key) : false; },
   };
 }
 
@@ -71,6 +71,19 @@ test('로그인한 사용자는 메모를 추가·조회·수정·삭제하고 �
   assert.equal((await call(api.item, { token: 'user-a', query: { id } })).status, 404);
 });
 
+test('다른 사용자의 메모는 읽기·수정·삭제 모두 404이고 내용이 바뀌지 않는다', async () => {
+  const api = createNotesApi({ verify, store: memoryStore() });
+  const { id } = (await call(api.collection, { method: 'POST', token: 'user-a', body: { title: 'A 메모', body: 'A 내용' } })).body;
+  const other = { token: 'user-b', query: { id } };
+  assert.deepEqual((await call(api.item, other)).body, { error: 'NOT_FOUND' });
+  assert.equal((await call(api.item, { ...other, method: 'GET' })).status, 404);
+  const put = await call(api.item, { ...other, method: 'PUT', body: { title: '탈취', body: '탈취', owner_id: B } });
+  assert.equal(put.status, 404);
+  assert.equal((await call(api.item, { ...other, method: 'DELETE' })).status, 404);
+  assert.deepEqual((await call(api.item, { token: 'user-a', query: { id } })).body, { id, title: 'A 메모', body: 'A 내용' });
+  assert.deepEqual((await call(api.collection, { token: 'user-b' })).body, []);
+});
+
 test('잘못된 입력과 id, 허용되지 않은 방법을 거부한다', async () => {
   const api = createNotesApi({ verify, store: memoryStore() });
   for (const body of [null, {}, { title: '', body: 'x' }, { title: 'x' }, { title: 'x', body: 1 },
@@ -100,6 +113,10 @@ test('Supabase 저장소는 content 칸을 body로 바꿔 돌려주고 DB 오류
   const ok = createSupabaseStore({ from: () => chain({ data: [{ id: 'i', title: 't', content: 'c' }], error: null }) });
   assert.deepEqual(await ok.list(A), [{ id: 'i', title: 't', body: 'c' }]);
   assert.deepEqual(calls[0], ['owner_id', A]);
+  calls.length = 0;
+  const one = createSupabaseStore({ from: () => chain({ data: { id: 'i', title: 't', content: 'c' }, error: null }) });
+  await one.get(A, 'note-id');
+  assert.deepEqual(calls, [['id', 'note-id'], ['owner_id', A]]);
   const bad = createSupabaseStore({ from: () => chain({ data: null, error: { message: 'x' } }) });
   await assert.rejects(bad.list(A));
 });

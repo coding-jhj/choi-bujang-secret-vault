@@ -62,17 +62,17 @@ export function createNotesApi({ verify, store }) {
       if (typeof id !== 'string' || !UUID.test(id)) { send(response, 404, { error: 'NOT_FOUND' }); return; }
       await run(response, async () => {
         if (request.method === 'GET') {
-          const note = await store.get(id);
+          const note = await store.get(user.userId, id);
           if (!note) { send(response, 404, { error: 'NOT_FOUND' }); return; }
           send(response, 200, note);
         } else if (request.method === 'PUT') {
           const input = readBody(request);
           if (!input) { send(response, 400, { error: 'INVALID_NOTE' }); return; }
-          const note = await store.update(id, input);
+          const note = await store.update(user.userId, id, input);
           if (!note) { send(response, 404, { error: 'NOT_FOUND' }); return; }
           send(response, 200, note);
         } else {
-          if (!(await store.remove(id))) { send(response, 404, { error: 'NOT_FOUND' }); return; }
+          if (!(await store.remove(user.userId, id))) { send(response, 404, { error: 'NOT_FOUND' }); return; }
           send(response, 200, { id });
         }
       });
@@ -93,17 +93,19 @@ export function createSupabaseStore(client) {
       return check(await client.from('notes').insert({ owner_id: ownerId, title, content: body })
         .select('id').single()).id;
     },
-    async get(id) {
-      const row = check(await client.from('notes').select('id,title,content').eq('id', id).maybeSingle());
+    async get(ownerId, id) {
+      const row = check(await client.from('notes').select('id,title,content')
+        .eq('id', id).eq('owner_id', ownerId).maybeSingle());
       return row ? toNote(row) : null;
     },
-    async update(id, { title, body }) {
+    async update(ownerId, id, { title, body }) {
       const row = check(await client.from('notes').update({ title, content: body })
-        .eq('id', id).select('id,title,content').maybeSingle());
+        .eq('id', id).eq('owner_id', ownerId).select('id,title,content').maybeSingle());
       return row ? toNote(row) : null;
     },
-    async remove(id) {
-      return check(await client.from('notes').delete().eq('id', id).select('id')).length > 0;
+    async remove(ownerId, id) {
+      return check(await client.from('notes').delete()
+        .eq('id', id).eq('owner_id', ownerId).select('id')).length > 0;
     },
   };
 }

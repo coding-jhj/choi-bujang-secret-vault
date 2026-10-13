@@ -244,3 +244,10 @@
   그 밖에, 구현 당시 실행해 두고 이번 저장점 보고를 위해 다시 실행하지는 않은 결과를 9단계와 같은 방식으로 그대로 인용합니다: 판정기 퍼징 "69/69 cases, 0 throws, 0 malformed responses"(위 기준 2), `npm run detect:test` 6/6, `npm run test:notes` 8/8, `npm run test:r5` 3/3, `npm run test:package` 3/3, `npm run test:auth` 5/5 — 전부 통과로 보고됐습니다. 메모 복구 API의 즉석(인메모리) BOLA 시험 12건도 모두 PASS로 보고됐습니다: 소유자가 자기 메모 복구, 소유자가 아니면 404, 위조한 남의 소유 백업은 404이고 실제 소유자의 메모는 덮어쓰지 않음, 해시가 변조된 백업은 409, 백업이 없으면 404, 지워진 메모는 같은 id로 다시 생성됨, 로그인 없으면 401, 허용되지 않은 방법은 405, UUID가 아닌 id는 404, 다른 메모·다른 백업 행은 그대로 유지됨.
 - 확인하지 못한 것: 이번 10단계는 아직 실제 심판에 제출하지 않았습니다. 위 결과는 모두 로컬(또는 인메모리) 통과일 뿐 심판 채점이 아닙니다 — 8단계가 로컬 통과 뒤 실제 채점에서 48/100을 받았던 경험이 있으므로, 이번에도 로컬 통과를 심판 통과의 증거로 말하지 않습니다.
 - 다시 실행하는 방법: `npm run decider:test`, `npm run fixture:7`, `npm run detect:test`, `npm run test:notes`, `npm run test:r5`, `npm run test:package`, `npm run test:auth`, `node scripts/policy-diff.mjs`, `node scripts/policy-restore.mjs`(드라이런), `node scripts/policy-restore.mjs --confirm`.
+
+### 보완: 심판 제출 결과(UNV_AMBIGUOUS) 반영
+
+- 위 10단계의 1차 제출은 실제 심판 채점에서 `UNV_AMBIGUOUS`(심판이 배포된 사이트를 충분히 읽어낼 수 없어 판단을 보류함)를 받았습니다 — 실패로 채점된 것은 아닙니다.
+- `curl`로 실제 배포된 `/aleph.json`을 직접 조회해 원인을 진단했습니다: `aleph.config.json`에는 `restoreRoute`가 `"POST /api/notes/:id/restore"`로 채워져 있었지만, 배포된 `/aleph.json`에는 최상위 `restoreRoute` 키가 **빠져 있었습니다**. 원인은 `scripts/deployment-identity.mjs`의 `deploymentIdentity()`가 애초에 그 값을 출력 객체에 복사하는 코드가 없었기 때문입니다(10단계 구현 당시의 누락).
+- 기존 `originalApiUrl`·`allowedRoutes`의 5단계 이상 검사와 같은 fail-closed 패턴으로 고쳤습니다: `step >= 10`이면 `config.restoreRoute`가 올바른 형식의 경로 문자열인지 검사하고(아니면 예외를 던져 막음), 통과할 때만 `{ restoreRoute: config.restoreRoute }`를 결과 객체에 포함합니다. `step`이 10 미만이면 이 키 자체가 없으며, 수정 전 동작과 완전히 같습니다.
+- **이 수정은 아직 실제로 재배포·재채점되지 않았습니다.** 푸시 이후 배포된 `/aleph.json`에 `restoreRoute` 키가 실제로 나타나는지 다시 확인해야 하고, 심판에도 다시 제출해 `UNV_AMBIGUOUS`가 해소되는지 확인해야 합니다.

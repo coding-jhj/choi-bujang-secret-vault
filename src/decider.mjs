@@ -9,11 +9,120 @@
 //   upstream at the relay before this decider is called; per docs/DECIDER_REQUEST.md,
 //   `deviceRegistered: false` only reaches this function in the judge's virtual
 //   (test) requests. This rule is a defense-in-depth check on that signal.
-// - Reads no other request fields and logs nothing.
-export const RULE_IDS = Object.freeze(['device_registered']);
+// - Logs nothing.
+//
+// step_up_required rule (evaluated only after device_registered passes):
+// - "Anomalous" means ALL THREE hold at once:
+//     1. unusual hour: signals.hour is a finite number and (< 6 or >= 22);
+//     2. unusual network: signals.network is exactly the string 'unusual';
+//     3. burst reads: some recentEvents entry has count >= BURST_COUNT_THRESHOLD
+//        within ageSeconds <= BURST_WINDOW_SECONDS.
+// - `region` is read but intentionally NOT a factor in this iteration: region alone
+//   would permanently penalize users who are legitimately elsewhere, and the local
+//   practice cases (decider-test / fixture-7) only exercise hour+network+burst.
+// - `signals.source` is never used as evidence. 'judge_fixture' marks virtual data
+//   and must not be treated as real location evidence.
+// - Fail OPEN on ambiguous/missing signal data (falls through to the
+//   device_registered allow). This is the opposite of the device_registered hard
+//   gate, which fails CLOSED. It is intentional: per docs/DECIDER_REQUEST.md real
+//   traffic currently sends placeholder values (source:'none',
+//   region/network:'unknown'), so failing closed here would block every real user.
+//   This rule is an additive heuristic, not the access gate.
+// - Re-verification tension: docs/DECIDER_REQUEST.md warns "이 값만 보고 재인증
+//   확인 요청을 건너뛰지 않습니다" (do not skip the re-auth confirmation based on
+//   stepUp alone). This practice-only decider still honors stepUp.verified so the
+//   local decider:test passes, with strict bounds on authAgeSeconds (safe integer,
+//   0..900). Production should require stronger corroboration than this contract
+//   field alone provides.
+export const RULE_IDS = Object.freeze(['device_registered', 'step_up_required']);
 
 const SCHEMA = 'aleph.decision.v1';
 const RULE_DEVICE_REGISTERED = 'device_registered';
+const RULE_STEP_UP_REQUIRED = 'step_up_required';
+
+// Untuned heuristics pending an operator-defined threshold: the contract doc
+// defines no semantics or units for recentEvents kind/count.
+const BURST_COUNT_THRESHOLD = 10;
+const BURST_WINDOW_SECONDS = 300;
+
+const MAX_RECENT_EVENTS = 12;
+const MAX_AUTH_AGE_SECONDS = 900;
+
+function isPlainObject(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+// Reads only own properties so a polluted Object.prototype cannot inject values.
+function ownValue(obj, key) {
+  return Object.hasOwn(obj, key) ? obj[key] : undefined;
+}
+
+function stringOrUndefined(value) {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function finiteNumberOrUndefined(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+// Whitelist-only copy of the four documented signal keys. Any other property
+// (e.g. a forged `trusted` or `adminOverride`) is dropped, never surfaced.
+function readSignals(request) {
+  const raw = request.signals;
+  if (!isPlainObject(raw)) {
+    return { source: undefined, region: undefined, network: undefined, hour: undefined };
+  }
+  return {
+    source: stringOrUndefined(ownValue(raw, 'source')),
+    region: stringOrUndefined(ownValue(raw, 'region')),
+    network: stringOrUndefined(ownValue(raw, 'network')),
+    hour: finiteNumberOrUndefined(ownValue(raw, 'hour')),
+  };
+}
+
+// Whitelist-only copy of at most 12 documented recentEvents entries.
+function readRecentEvents(request) {
+  const raw = request.recentEvents;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .slice(0, MAX_RECENT_EVENTS)
+    .filter(isPlainObject)
+    .map((event) => ({
+      kind: stringOrUndefined(ownValue(event, 'kind')),
+      ageSeconds: finiteNumberOrUndefined(ownValue(event, 'ageSeconds')),
+      count: finiteNumberOrUndefined(ownValue(event, 'count')),
+    }));
+}
+
+function isAnomalous(signals, recentEvents) {
+  const unusualHour =
+    signals.hour !== undefined && (signals.hour < 6 || signals.hour >= 22);
+  const unusualNetwork = signals.network === 'unusual';
+  const burstReads = recentEvents.some(
+    (event) =>
+      event.count !== undefined &&
+      event.ageSeconds !== undefined &&
+      event.count >= BURST_COUNT_THRESHOLD &&
+      event.ageSeconds <= BURST_WINDOW_SECONDS,
+  );
+  return unusualHour && unusualNetwork && burstReads;
+}
+
+function isReverified(request) {
+  const stepUp = request.stepUp;
+  if (!isPlainObject(stepUp)) {
+    return false;
+  }
+  const authAgeSeconds = ownValue(stepUp, 'authAgeSeconds');
+  return (
+    ownValue(stepUp, 'verified') === true &&
+    Number.isSafeInteger(authAgeSeconds) &&
+    authAgeSeconds >= 0 &&
+    authAgeSeconds <= MAX_AUTH_AGE_SECONDS
+  );
+}
 
 export async function decide(request) {
   const isObject = typeof request === 'object' && request !== null;
@@ -26,6 +135,28 @@ export async function decide(request) {
       decision: 'deny',
       reasonCode: 'device_not_registered',
       ruleIds: [RULE_DEVICE_REGISTERED],
+    };
+  }
+
+  const signals = readSignals(request);
+  const recentEvents = readRecentEvents(request);
+
+  if (isAnomalous(signals, recentEvents)) {
+    if (!isReverified(request)) {
+      return {
+        schema: SCHEMA,
+        requestId,
+        decision: 'step_up',
+        reasonCode: 'step_up_required',
+        ruleIds: [RULE_STEP_UP_REQUIRED],
+      };
+    }
+    return {
+      schema: SCHEMA,
+      requestId,
+      decision: 'allow',
+      reasonCode: 'step_up_verified',
+      ruleIds: [RULE_STEP_UP_REQUIRED],
     };
   }
 

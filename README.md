@@ -87,3 +87,24 @@
   ```
 - 확인하지 못한 것: 실제 배포·운영 환경에서 기기 등록·미등록 기기 차단이 동작하는지는 확인하지 않았습니다. 이는 계약 문서가 설명하는 운영 릴레이(이 저장소 밖의 설비)에 달려 있습니다.
 - 다시 실행하는 방법: `npm run decider:test`.
+
+## 7단계: 평소와 다른 접속은 다시 확인합니다
+
+- `src/decider.mjs`의 `RULE_IDS`가 `['device_registered', 'step_up_required']`로 바뀌었습니다. 기기 등록 검사(6단계)는 그대로이고, 등록된 기기의 요청이라도 세 가지 신호가 모두 겹치면 "평소와 다른 접속(이상)"으로 보고 한 번 더 확인을 요구합니다: ① 평소와 다른 시각(`signals.hour`가 6시 미만 또는 22시 이상), ② 낯선 네트워크(`signals.network`가 정확히 `'unusual'`), ③ 짧은 시간 대량 조회(`recentEvents` 중 `ageSeconds`가 300초 이하이면서 `count`가 10 이상인 항목). 세 가지가 모두 참일 때만 이상으로 보며, 재확인 정보가 없으면 `decision: 'step_up'`·`reasonCode: 'step_up_required'`를 돌려줍니다. `stepUp.verified === true`이고 `authAgeSeconds`가 0~900초 사이의 안전한 정수이면 `decision: 'allow'`·`reasonCode: 'step_up_verified'`로 다시 통과시킵니다. 세 신호 중 하나라도 빠지면 이상으로 보지 않고 6단계와 같은 `allow`/`device_registered`를 돌려줍니다.
+- 위조·변조 방어: `src/decider.mjs`의 `readSignals`·`readRecentEvents` 함수가 `signals`(`source`·`region`·`network`·`hour`)와 `recentEvents`(각 항목의 `kind`·`ageSeconds`·`count`, 최대 12건)를 문서(`docs/DECIDER_REQUEST.md`)에 적힌 이름만 골라 타입까지 확인하며 다시 만듭니다. 문서에 없는 이름(예: `trusted`, `adminOverride`)이나 타입이 다른 값은 모두 버려져(`undefined`) 판정에 영향을 줄 수 없습니다.
+- 한계: (1) `region`과 `signals.source`는 이번 단계에서도 판정 요인으로 쓰지 않습니다(의도적) — region만으로는 실제로 해외에 있는 정상 사용자를 영구히 불리하게 만들 수 있고, 실제 경로는 현재 `region`·`network`에 `"unknown"` 같은 자리표시자를 보내기 때문입니다(`docs/DECIDER_REQUEST.md`). (2) 같은 문서는 `stepUp` 설명에서 "이 값만 보고 재인증 확인 요청을 건너뛰지 않습니다"라고 경고하는데, 이 연습용 판정기는 로컬 시험을 통과시키기 위해 `stepUp.verified`와 0~900초 범위의 `authAgeSeconds`만으로 재통과를 허용합니다 — 연습 전용 타협이며 운영 환경에 충분한 재인증 증거라고 주장하지 않습니다. (3) 평소와 다른 시각·네트워크 판정 기준과 대량 조회 임계값(6시/22시, `'unusual'`, 300초 안에 10회)은 운영 등록부가 아니라 이번 로컬 작업에서 임의로 고른 값으로, 조정되지 않았습니다. (4) **실제 자료 접근은 이 저장소 어디에서도 step_up 대기 상태로 막혀 있지 않습니다.** `src/decider.mjs`의 `decide()`는 어떤 API 경로에도 연결돼 있지 않습니다 — `api/notes.js`·`api/notes/[id].js`는 `decider.mjs`를 import하지 않고 토큰 확인과 소유자 검사(3·4단계)만 합니다. `scripts/bundle.mjs`가 `decider.mjs`에서 가져오는 것은 `RULE_IDS` 이름뿐이며, 제출 묶음의 `policyRules` 칸에 자기 보고용으로 나열하는 용도입니다. 이번 제작 3에서 "판정기가 재인증 뒤 새 로그인 시각을 외부 엔진에 확인받는" 계약·API·웹훅이 이 저장소에 있는지 찾아봤고, 없다는 것을 확인했습니다 — 그런 연동 계약이 없으므로 지금은 이 규칙을 실제 자료 응답과 연결할 방법이 없고, 로컬 연습 규칙만 구현하고 시험했습니다.
+- 확인한 것: `npm run decider:test` 실제 결과(이번 작업에서 새로 실행):
+  ```
+  통과 · 등록 기기의 정상 요청
+  통과 · 미등록 기기의 가상 요청
+  통과 · 복합 이상 접속
+  통과 · 다시 확인한 복합 이상 접속
+  이 명령은 가상 요청으로 연습하며 심판 통과 증거가 아닙니다.
+  ```
+  (스크립트는 네 항목이 모두 "통과"일 때만 종료 코드 0으로 끝나며, 이번 실행은 오류 없이 종료 코드 0이었습니다.) `npm run fixture:7`도 같은 작업에서 다시 실행해 확인했고, 실제 결과는 다음과 같습니다:
+  ```
+  정상 사건: allow
+  복합 이상 사건: step_up
+  ```
+- 확인하지 못한 것: 실제 배포 사이트를 대상으로 한 기기·네트워크·시간 이상 탐지는 시험하지 않았습니다(실 트래픽 시험 없음). 이 판정기가 어떤 API에도 연결돼 있지 않으므로 배포 환경에서 이 규칙이 실제로 켜져 있는지를 따지는 것 자체가 아직 의미가 없습니다. 이번 단계 카드의 "직접 확인할 것" 두 가지 중, "정상과 복합 이상 사건의 판정이 다른가?"는 위 `decider:test`·`fixture:7` 결과로 예(정상=`allow`, 복합 이상=`step_up`, 재확인 뒤=`allow`)라고 로컬에서 확인했습니다. "추가 확인 전 자료가 없는가?"는 확인할 수 없습니다/미구현입니다 — 위 한계 (4)에서 적은 대로 `decide()`의 `step_up` 결정을 실제 메모 자료 응답과 연결하는 코드가 이 저장소에 없고, `api/notes.js`·`api/notes/[id].js`는 `decider.mjs`를 전혀 모르기 때문입니다.
+- 다시 실행하는 방법: `npm run decider:test`, `npm run fixture:7`.

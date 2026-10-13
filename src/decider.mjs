@@ -34,11 +34,43 @@
 //   local decider:test passes, with strict bounds on authAgeSeconds (safe integer,
 //   0..900). Production should require stronger corroboration than this contract
 //   field alone provides.
-export const RULE_IDS = Object.freeze(['device_registered', 'step_up_required']);
+//
+// resource_zone rule (evaluated after device_registered, before step_up_required):
+// - Allows the request to continue only when `request.route` is a string that EXACTLY
+//   (case-sensitive, no trimming, no prefix/pattern matching) equals one of the
+//   explicitly enumerated route shapes in ALLOWED_ROUTES. Anything else — non-string,
+//   missing, unknown path such as 'GET /notes/export', different casing, extra
+//   suffix — denies with reasonCode 'unknown_route' (fail closed). No guessed or
+//   loosely matched path is implicitly trusted.
+// - Route strings follow the decider contract/fixture convention (no '/api' prefix),
+//   per docs/DECIDER_REQUEST.md ("`route`는 `GET /notes/:id`처럼 허용된 경로 모양").
+//   This is a different namespace from aleph.config.json allowedRoutes ('/api/...').
+// - Scope limit: this rule checks ROUTE SHAPE only (zone hygiene). The decider has no
+//   database access and cannot know who owns a given note/announcement row, so it
+//   cannot stop one user reading or modifying another user's row (BOLA). Per-row
+//   ownership is enforced in the API layer (src/notes-api.mjs,
+//   src/announcements-api.mjs via owner_id filters). Both layers are required.
+// - On a match, the outcome is decided by the later rules, and ruleIds name the rule
+//   that decided it (unchanged from before this rule was added).
+export const RULE_IDS = Object.freeze(['device_registered', 'step_up_required', 'resource_zone']);
 
 const SCHEMA = 'aleph.decision.v1';
 const RULE_DEVICE_REGISTERED = 'device_registered';
 const RULE_STEP_UP_REQUIRED = 'step_up_required';
+const RULE_RESOURCE_ZONE = 'resource_zone';
+
+const ALLOWED_ROUTES = Object.freeze([
+  'GET /notes',
+  'POST /notes',
+  'GET /notes/:id',
+  'PUT /notes/:id',
+  'DELETE /notes/:id',
+  'GET /announcements',
+  'POST /announcements',
+  'GET /announcements/:id',
+  'PUT /announcements/:id',
+  'DELETE /announcements/:id',
+]);
 
 // Untuned heuristics pending an operator-defined threshold: the contract doc
 // defines no semantics or units for recentEvents kind/count.
@@ -135,6 +167,17 @@ export async function decide(request) {
       decision: 'deny',
       reasonCode: 'device_not_registered',
       ruleIds: [RULE_DEVICE_REGISTERED],
+    };
+  }
+
+  const route = stringOrUndefined(ownValue(request, 'route'));
+  if (route === undefined || !ALLOWED_ROUTES.includes(route)) {
+    return {
+      schema: SCHEMA,
+      requestId,
+      decision: 'deny',
+      reasonCode: 'unknown_route',
+      ruleIds: [RULE_RESOURCE_ZONE],
     };
   }
 

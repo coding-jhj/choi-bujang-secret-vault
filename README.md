@@ -108,3 +108,34 @@
   ```
 - 확인하지 못한 것: 실제 배포 사이트를 대상으로 한 기기·네트워크·시간 이상 탐지는 시험하지 않았습니다(실 트래픽 시험 없음). 이 판정기가 어떤 API에도 연결돼 있지 않으므로 배포 환경에서 이 규칙이 실제로 켜져 있는지를 따지는 것 자체가 아직 의미가 없습니다. 이번 단계 카드의 "직접 확인할 것" 두 가지 중, "정상과 복합 이상 사건의 판정이 다른가?"는 위 `decider:test`·`fixture:7` 결과로 예(정상=`allow`, 복합 이상=`step_up`, 재확인 뒤=`allow`)라고 로컬에서 확인했습니다. "추가 확인 전 자료가 없는가?"는 확인할 수 없습니다/미구현입니다 — 위 한계 (4)에서 적은 대로 `decide()`의 `step_up` 결정을 실제 메모 자료 응답과 연결하는 코드가 이 저장소에 없고, `api/notes.js`·`api/notes/[id].js`는 `decider.mjs`를 전혀 모르기 때문입니다.
 - 다시 실행하는 방법: `npm run decider:test`, `npm run fixture:7`.
+
+## 8단계: 자료마다 갈 수 있는 구역을 나눕니다
+
+- 강사 공지를 메모와 별도 자원으로 분리했습니다. 표는 `supabase/schema-announcements.sql`(`public.announcements`, `id`·`owner_id`·`title`·`content`·`created_at`, notes와 같은 모양, RLS 켬, `anon`·`authenticated` 전체 권한 회수)이고, 서버 로직은 `src/announcements-api.mjs`, 서버 함수는 `api/announcements.js`(목록·추가)·`api/announcements/[id].js`(조회·수정·삭제)입니다. 세 파일 모두 `src/notes-api.mjs`의 guard·send·readBody·run 구조와 검증 상수, 상태 코드를 그대로 따라 만들었습니다. "강사"는 별도 역할 칸이 아니라 공지 행의 `owner_id` 주인을 뜻합니다 — 역할 시스템은 없고 필요하지도 않습니다.
+- **이 자원은 이번 한 제작 단위 안에서 2단계로 만들어졌고, 그 과정을 숨기지 않고 적습니다.** 1차로는 로그인 확인만 하고 `owner_id` 조건이 없는 채로 끝냈다면, 로그인한 어떤 사용자(학생이든 심사용 신원이든)든 id를 알거나 추측하면 다른 사람의 공지를 읽고·덮어쓰고·지울 수 있었을 것입니다 — 전형적인 BOLA(Broken Object Level Authorization)입니다. 2차로 `get`·`update`·`remove`와 목록(`list`) 네 곳 모두에 `.eq('owner_id', ownerId)`를 추가해 막았습니다(`src/announcements-api.mjs`의 `createSupabaseStore`). 목록까지 소유자로 좁힌 이유는, 좁히지 않으면 로그인한 누구나 다른 사람의 공지 id·제목을 열거할 수 있어 그 자체로 정보 노출이자 BOLA의 첫 단계가 되기 때문입니다.
+- 이 2차 수정은 커밋하지 않은 즉석(ad hoc) 메모리 내 시험으로 확인했습니다: 실제 `createAnnouncementsApi` + `createSupabaseStore`를, 실제로 소유자로 걸러 주는 가짜(in-memory) Supabase 클라이언트에 연결해 — 주체 A는 자기 공지를 추가·조회·수정·삭제할 수 있고, 다른 소유자인 주체 B는 A의 공지 id로 GET·PUT·DELETE를 보내면 모두 404이며, B의 목록에는 A의 행이 나타나지 않고, PUT 본문에 위조한 `owner_id` 필드를 넣어도 무시된다(소유권은 절대 요청에서 가져오지 않는다)는 것을 확인했습니다. 로그인 없음 401, 잘못된 id 404, 잘못된 본문 400, 허용되지 않은 방법 405 같은 통상 경계 조건도 같은 시험에서 그대로 지켜졌습니다.
+- `src/notes-api.mjs`는 건드리지 않았습니다. 4단계부터 이미 소유자 조건이 있어 메모의 교차 사용자 읽기·쓰기·목록 노출(이번 카드의 처음 세 몬스터)은 이미 막혀 있었고, 이번 단계에서는 그것을 다시 확인만 했습니다.
+- `src/decider.mjs`에 세 번째 규칙 `resource_zone`을 추가했습니다(`RULE_IDS`는 이제 `['device_registered', 'step_up_required', 'resource_zone']`이고, 기기 등록 검사 다음·재인증 검사 앞에 평가됩니다). `request.route`가 미리 정해 둔 10개 경로 문자열(메모 5개, 공지 5개, `/api` 접두어 없음 — 판정기 계약·픽스처 관례와 맞춤) 중 하나와 대소문자·공백까지 정확히 같을 때만 통과시키고, 그 밖의 모든 값은 `reasonCode: 'unknown_route'`로 거부합니다(실패 시 닫힘). 이는 단계 카드가 설명한 Peloton 교훈처럼 "자원 id와 같은 깊이에 숨은 함수 경로" 같은 경로 모양 속임수를 막기 위한 규칙입니다.
+- **이 규칙의 한계를 분명히 적습니다: `resource_zone`은 경로 모양만 봅니다.** `src/decider.mjs`는 데이터베이스에 접근하지 않으므로 특정 자원 행(예: 공지 하나)을 누가 소유했는지 전혀 알 수 없고 확인할 수도 없습니다. 그 소유자 검사는 전부 API 계층의 일이며, 위에서 적은 2차 수정(`owner_id` 필터링)이 바로 그 역할을 합니다. 두 계층이 함께 있어야만 안전합니다 — 판정기만으로는 BOLA를 막지 못합니다.
+- 즉석(커밋하지 않은) 점검으로 확인한 것: 알 수 없거나 형식이 잘못된 경로(대소문자가 다름, 끝에 공백, 질의 문자열이 붙음, `Object.prototype`을 오염시키려는 값, 배열, `String` 객체, 누락)는 모두 거부/`unknown_route`로 막혔고, 10개의 정상 경로는 모두 그대로 기존 step_up/allow 로직까지 통과했습니다.
+- `src/attack-check.mjs`에 로그인하지 않은 상태의 자기 점검 3개를 더했습니다: `no_login_announcements_list`, `no_login_announcements_create`, `no_login_announcement_write`(기존 메모 점검과 같은 방식으로 401/403과 JSON을 기대). `attackAttempts`는 11개에서 14개가 됩니다.
+- `aleph.config.json`의 `allowedRoutes`에 `/api/announcements` 다섯 경로(목록 GET·POST, 항목 GET·PUT·DELETE)를 추가했습니다. `step`은 그대로 5입니다(건드리지 않음).
+- 두 기존 시험 파일도 바뀐 목록을 반영하도록 고쳤습니다: `test/r5.test.mjs`(새 attackId 3개를 두 하드코딩 목록 모두에 추가), `test/package-starter.test.mjs`와 `package/baseline-functions.json`의 `allowedNew`에 `"api/announcements.js"`를 알파벳 순으로 추가.
+- 확인한 것(이번 작업에서 새로 실행한 실제 결과):
+  ```
+  통과 · 등록 기기의 정상 요청
+  통과 · 미등록 기기의 가상 요청
+  통과 · 복합 이상 접속
+  통과 · 다시 확인한 복합 이상 접속
+  이 명령은 가상 요청으로 연습하며 심판 통과 증거가 아닙니다.
+  ```
+  (`npm run decider:test`, 종료 코드 0.) `npm run fixture:7`도 실제 결과는 다음과 같아 7단계와 똑같이 나왔습니다 — `fixture-7.mjs`가 보내는 `route: 'GET /notes/:id'`가 새 허용 목록에 있어서입니다:
+  ```
+  정상 사건: allow
+  복합 이상 사건: step_up
+  ```
+  나머지 시험도 전부 통과했습니다: `npm run test:r5`(3/3), `npm run test:package`(3/3), `npm run test:notes`(8/8), `npm run test:auth`(5/5). 회귀는 없습니다.
+- 확인하지 못한 것: 실제로 배포된 사이트에 서로 다른 두 로그인 계정(예: 진짜 학생 토큰과 진짜 심사용 신원 토큰)으로 `/api/announcements/:id`를 교차 요청하는 시험은 하지 않았습니다 — 4단계 메모 때와 같은 이유(실제 비밀번호를 대화에 쓰지 않기 위해)입니다. 위에 적은 인메모리 즉석 시험과 `attack-check.mjs`의 비로그인 자기 점검 3개만 실행했고, 실제 교차 계정 동작은 학생(또는 심사자)이 직접 확인해야 합니다.
+- `supabase/schema-announcements.sql`은 아직 실제 Supabase 프로젝트에 적용하지 않았습니다. 다른 모든 `supabase/*.sql` 파일처럼, 학생이 Supabase SQL Editor에서 직접 한 번 실행해야 실제 배포된 공지 API가 동작합니다. 이 실행은 코딩 도구가 하지 않았습니다.
+- 한계: 예전 공개 커밋과 배포에 남은 옛 `data.json`은 여전히 해결되지 않았습니다. `resource_zone`의 경로 허용 목록·역치는 이번 로컬 작업에서 정한 값이며 운영 등록부와 맞춰 조정되지 않았습니다.
+- 다시 실행하는 방법: `npm run decider:test`, `npm run fixture:7`, `npm run test:notes`, `npm run test:r5`, `npm run test:package`, `npm run test:auth`.

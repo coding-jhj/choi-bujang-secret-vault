@@ -139,3 +139,35 @@
 - `supabase/schema-announcements.sql`은 아직 실제 Supabase 프로젝트에 적용하지 않았습니다. 다른 모든 `supabase/*.sql` 파일처럼, 학생이 Supabase SQL Editor에서 직접 한 번 실행해야 실제 배포된 공지 API가 동작합니다. 이 실행은 코딩 도구가 하지 않았습니다.
 - 한계: 예전 공개 커밋과 배포에 남은 옛 `data.json`은 여전히 해결되지 않았습니다. `resource_zone`의 경로 허용 목록·역치는 이번 로컬 작업에서 정한 값이며 운영 등록부와 맞춰 조정되지 않았습니다.
 - 다시 실행하는 방법: `npm run decider:test`, `npm run fixture:7`, `npm run test:notes`, `npm run test:r5`, `npm run test:package`, `npm run test:auth`.
+
+### 보완: 심판 피드백 반영
+
+- 위 8단계의 1차 제출은 실제 심판 채점을 받았고, "다른 구역 메모를 API로 조회" 몬스터(`갓김치사량: 다른 구역 메모를 API로 조회`)에서 reasonCode `S08_OTHER_ZONE_ALLOWED`로 **실패**했습니다(점수 48/100). 로컬 연습 추정이 아니라 실제 채점 결과입니다.
+- 심판의 교정 지시 원문(한국어, 그대로 인용):
+  ```
+  판정기가 반 공지·강사 자료에 대한 쓰기를 허용하거나, 메모 전체 목록처럼 여러 사람의 자료를
+  한꺼번에 여는 경로를 허용합니다. 판정기가 반 공지나 강사 자료에 대한 쓰기(POST·PUT·PATCH·
+  DELETE)를 허용하거나 메모 전체 목록 경로를 열어 둡니다. 요청 계약에는 역할이 없으므로
+  판정기는 공지 쓰기를 누구에게나 거부합니다. 메모 한 건의 주인 비교는 API가 하므로 판정기에
+  넣지 않아도 됩니다. 이전 규칙은 유지합니다.
+  ```
+- `src/decider.mjs`의 `resource_zone` 규칙에 세 가지를 추가했습니다(기존 `unknown_route` 허용 목록 판정 뒤에 평가됨, 이전 규칙은 그대로 유지):
+  - `announcement_write_denied`: 공지 쓰기(`POST /announcements`, `PUT /announcements/:id`, `DELETE /announcements/:id`)는 예외 없이 전원 거부합니다 — 요청 계약에 역할 필드가 없어 판정기가 강사와 학생을 구분할 수 없기 때문입니다.
+  - `zone_mismatch`: `route`의 method·구역과 실제 요청의 `service`·`path`가 정확히 일치해야 통과합니다(목록 경로는 `/<구역>`, `:id` 경로는 `/<구역>/<id 한 조각>`); 누락되거나 형식이 잘못된 값은 모두 거부합니다(실패 시 닫힘).
+  - `notes_list_denied`: 메모 전체 목록(`GET /notes`)도 판정기가 거부합니다 — 심판이 이를 별도 실패 유형으로 명시했기 때문입니다. 메모 한 건의 소유자 검사는 여전히 API(`src/notes-api.mjs`)만의 역할이며 바꾸지 않았습니다.
+- 확인한 것(이번 작업에서 새로 실행한 실제 결과):
+  ```
+  통과 · 등록 기기의 정상 요청
+  통과 · 미등록 기기의 가상 요청
+  통과 · 복합 이상 접속
+  통과 · 다시 확인한 복합 이상 접속
+  이 명령은 가상 요청으로 연습하며 심판 통과 증거가 아닙니다.
+  ```
+  (`npm run decider:test`, 4개 항목 모두 통과, 종료 코드 0.) `npm run fixture:7`도 실제 결과는 다음과 같습니다:
+  ```
+  정상 사건: allow
+  복합 이상 사건: step_up
+  ```
+  두 시험 모두 기존 두 규칙(`device_registered`, `step_up_required`)에 회귀가 없습니다. 그 외에 커밋하지 않은 즉석(ad hoc) 수동 시험 24건(공지 쓰기 거부, `zone_mismatch` 경계 조건, 메모 전체 목록 거부, 기존 허용 경로 10개 통과 등)도 모두 PASS를 확인했습니다.
+- 확인하지 못한 것(알려진 위험): 실제 심판이 공지·메모 요청에 실제로 보내는 `service`·`path` 값의 형식이 `fixture-7.mjs`의 관례와 정확히 같은지는 이 저장소 작업만으로는 독립적으로 확인할 수 없습니다. `zone_mismatch`는 불일치나 누락을 전부 거부(fail closed)하므로, 실제 심판의 형식이 이 관례와 조금이라도 다르면 정당한 요청까지 잘못 거부될 수 있습니다. 이는 다음 실제 채점 결과로만 확인됩니다.
+- 다시 실행하는 방법: `npm run decider:test`, `npm run fixture:7`.

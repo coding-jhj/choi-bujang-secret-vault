@@ -171,3 +171,27 @@
   두 시험 모두 기존 두 규칙(`device_registered`, `step_up_required`)에 회귀가 없습니다. 그 외에 커밋하지 않은 즉석(ad hoc) 수동 시험 24건(공지 쓰기 거부, `zone_mismatch` 경계 조건, 메모 전체 목록 거부, 기존 허용 경로 10개 통과 등)도 모두 PASS를 확인했습니다.
 - 확인하지 못한 것(알려진 위험): 실제 심판이 공지·메모 요청에 실제로 보내는 `service`·`path` 값의 형식이 `fixture-7.mjs`의 관례와 정확히 같은지는 이 저장소 작업만으로는 독립적으로 확인할 수 없습니다. `zone_mismatch`는 불일치나 누락을 전부 거부(fail closed)하므로, 실제 심판의 형식이 이 관례와 조금이라도 다르면 정당한 요청까지 잘못 거부될 수 있습니다. 이는 다음 실제 채점 결과로만 확인됩니다.
 - 다시 실행하는 방법: `npm run decider:test`, `npm run fixture:7`.
+
+## 9단계: 도플갱어를 찾고 권한을 거둡니다
+
+- `src/detect.mjs`의 `readEvent()`가 사건에서 **딱 여섯 값만** 화이트리스트로 읽습니다: 가명 사용자(`identity.sub`), 요청 종류(`method`), 시각(`at`), 기기(`deviceId`), 판정(`decision`), 네트워크(`network`/`signals.network`). 메모 본문·토큰·실명·지역 같은 다른 값은 전혀 읽지도, 저장하지도, 출력하지도 않습니다. 원본 사건 객체를 복사·로그·반환하지 않고 `readEvent()`가 고른 값만 각 규칙에 건네며, `Object.hasOwn`으로 자기 속성만 읽어 프로토타입 오염 시도에 영향받지 않습니다. 타입이 다르거나 형식이 잘못된 값은 조용히 `undefined`로 버려집니다.
+- 기존 `burst_read` 규칙(같은 `identity.sub`의 `GET` 사건이 10분 어느 구간에서든 120건을 넘으면 `{action:'propose_revocation', reasonCode:'burst_read', subject}`)은 출력 모양을 그대로 유지했습니다. `scripts/detect-test.mjs`는 건드리지 않았고, 그 안의 기존 6개 사례 전부 바이트 그대로 통과합니다(아래 확인한 것).
+- 새 규칙 `network_volume_anomaly`를 추가했습니다: 한 기기(`deviceId`)에서 요청 종류를 가리지 않고 10분 어느 구간에서든 15건을 넘고, 그 기기의 사건 중 하나라도 네트워크 값이 `'usual'`이 아니면 `{action:'propose_revocation', reasonCode:'network_volume_anomaly', device}`를 돌려줍니다. 평가 순서는 새 기기 규칙 → `burst_read` → `observe`이며, 두 규칙이 모두 해당될 수 있는 사건에서는 기기 규칙이 먼저 이깁니다(의도적 설계입니다).
+- **다음 세 가지는 추정값이며, 사실대로 적습니다.**
+  1. 필드명 `deviceId`·`decision`·`network`/`signals.network`는 `docs/DETECT_EVENTS.md`에 없는 이름입니다. 이 문서는 사건 모양을 `at`·`method`·`identity.sub` 세 값만 정의하고, "이 파일의 사건 모양은 로컬 연습용입니다 ... 운영 반 엔진이 검증한 사건을 전달하고 회수 제안을 집행하는 경로는 별도로 연결·시험해야 합니다"라고 스스로 적어 둡니다. 세 이름은 `docs/DECIDER_REQUEST.md`의 판정기 계약(`request.deviceId`, `request.signals.network`, `decide()`의 응답 `decision`)에서 이름만 빌려 온 **최선 추정**일 뿐, 실제 심판·반 엔진이 보내는 사건이 이 이름을 쓰는지 확인된 적이 없습니다. 이름이 다르면 이 규칙은 에러 없이 그 값을 조용히 읽지 못합니다(작동하지 않지만 멈추지도 않습니다).
+  2. reasonCode `network_volume_anomaly`는 저희가 만든 이름이며 `docs/DETECT_EVENTS.md`를 포함해 어떤 알려진 등록부에도 없습니다. 다음 실제 채점에서 바뀌어야 할 수 있습니다.
+  3. 임계값(기기당 10분 15건 초과, 평소 네트워크 기준 `'usual'`)은 조정되지 않은 임의 값이며, `src/decider.mjs`의 기존 임계값들과 같은 성격의 로컬 추정입니다.
+- 확인한 것: `npm run detect:test` 실제 결과(이번 보고를 위해 다시 실행하지 않고, 구현 때 실행해 둔 결과를 그대로 인용합니다):
+  ```
+  통과 · 정상 조회 30건
+  통과 · 10분 안에 120건
+  통과 · 10분 안에 121건
+  통과 · 폭주 조회 200건
+  통과 · 서로 다른 사용자 각 100건
+  통과 · 10분 밖으로 흩어진 조회 200건
+  가상 사건 연습이며 실제 접속 회수나 심판 통과 증거가 아닙니다.
+  exit=0
+  ```
+  그 밖에 커밋하지 않은 즉석(ad hoc) 시험으로 다음을 추가 확인했습니다: 주입한 `noteBody`·`token`·`realName` 같은 필드가 출력에 영향을 주지도, 나타나지도 않음(비밀 유출 없음); `Object.prototype` 오염 시도와 형식이 잘못되거나 비어 있는 사건을 던지지 않고 처리함; `GET`이 아닌 사건은 `burst_read` 집계에서 빠짐; 두 규칙이 모두 해당될 수 있을 때 기기 규칙이 먼저 이김.
+- 확인하지 못한 것: 이번 9단계는 아직 실제 심판에 제출하지 않았습니다 — 위 결과는 로컬 연습 통과일 뿐 심판 채점이 아닙니다. **`detect()`는 이 저장소 어디에서도 실제 회수·권한 변경 경로에 연결되어 있지 않습니다** — `propose_revocation`을 반환할 뿐이고, 그것을 받아 실제로 권한을 거두거나 경과 시간을 재는 쪽은 없습니다. 이는 7~8단계에서 `src/decider.mjs`의 `decide()`가 어떤 API 경로에도 연결되지 않았다고 적었던 것과 같은 자리입니다. `AGENTS.md`(7행)도 "9단계 `src/detect.mjs`를 고칠 때는 `docs/DETECT_EVENTS.md`의 가상 사건 형식을 먼저 읽으세요. `npm run detect:test`가 통과해도 운영 반 엔진의 사건 전달·접속 회수가 연결됐다고 쓰지 마세요"라고 못박고 있습니다. 8단계가 로컬 통과 뒤 실제 심판 채점에서 `S08_OTHER_ZONE_ALLOWED`로 48/100 받았던 경험이 있으므로, 이번에도 로컬 통과를 심판 통과의 증거로 말하지 않습니다.
+- 다시 실행하는 방법: `npm run detect:test`

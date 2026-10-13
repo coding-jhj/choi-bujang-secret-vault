@@ -195,3 +195,52 @@
   그 밖에 커밋하지 않은 즉석(ad hoc) 시험으로 다음을 추가 확인했습니다: 주입한 `noteBody`·`token`·`realName` 같은 필드가 출력에 영향을 주지도, 나타나지도 않음(비밀 유출 없음); `Object.prototype` 오염 시도와 형식이 잘못되거나 비어 있는 사건을 던지지 않고 처리함; `GET`이 아닌 사건은 `burst_read` 집계에서 빠짐; 두 규칙이 모두 해당될 수 있을 때 기기 규칙이 먼저 이김.
 - 확인하지 못한 것: 이번 9단계는 아직 실제 심판에 제출하지 않았습니다 — 위 결과는 로컬 연습 통과일 뿐 심판 채점이 아닙니다. **`detect()`는 이 저장소 어디에서도 실제 회수·권한 변경 경로에 연결되어 있지 않습니다** — `propose_revocation`을 반환할 뿐이고, 그것을 받아 실제로 권한을 거두거나 경과 시간을 재는 쪽은 없습니다. 이는 7~8단계에서 `src/decider.mjs`의 `decide()`가 어떤 API 경로에도 연결되지 않았다고 적었던 것과 같은 자리입니다. `AGENTS.md`(7행)도 "9단계 `src/detect.mjs`를 고칠 때는 `docs/DETECT_EVENTS.md`의 가상 사건 형식을 먼저 읽으세요. `npm run detect:test`가 통과해도 운영 반 엔진의 사건 전달·접속 회수가 연결됐다고 쓰지 마세요"라고 못박고 있습니다. 8단계가 로컬 통과 뒤 실제 심판 채점에서 `S08_OTHER_ZONE_ALLOWED`로 48/100 받았던 경험이 있으므로, 이번에도 로컬 통과를 심판 통과의 증거로 말하지 않습니다.
 - 다시 실행하는 방법: `npm run detect:test`
+
+## 10단계: 백업에서 자료실을 되살립니다
+
+- **정책을 침해 전 상태로 비교·복원하는 도구를 추가했습니다.** `backups/policy-snapshot.json`은 `RULE_IDS`(`src/decider.mjs`)·`allowedRoutes`·`identityProvider`(`aleph.config.json`) 세 값만 담은 자기 검증(self-verifying) 사본입니다. 사본 자신의 `sha256` 칸은 나머지 값을 키 정렬 규범형 JSON으로 직렬화한 뒤 SHA-256을 구해 적은 것으로(`scripts/policy-diff.mjs`의 `canonicalJson`·`computeSnapshotHash`), 누가 파일을 고쳐도 해시가 맞지 않으면 바로 드러납니다 — 서명은 아니며 신뢰의 뿌리는 이 사본이 Git 기록에 커밋되어 있다는 사실입니다.
+  - `scripts/policy-diff.mjs`: 사본을 읽어 형식과 해시를 먼저 검증하고(누락·손상·변조 시 즉시 중단하고 오류 메시지만 남김), 지금 `aleph.config.json`·`RULE_IDS`와 세 항목을 각각 비교해 차이를 한글로 보여 줍니다. 복원 실행 **전에** "복원할 버전과 변경 범위"를 먼저 보여 주는 용도입니다.
+  - `scripts/policy-restore.mjs`: 기본은 드라이런(아무것도 쓰지 않고 바뀔 내용만 보여 줌)이며, `--confirm`을 붙여야 `aleph.config.json`의 `allowedRoutes`·`identityProvider`만 사본 값으로 덮어씁니다(다른 칸·들여쓰기·줄바꿈 문자는 그대로 유지, 임시 파일에 쓴 뒤 바꿔치기해 중간에 깨진 파일이 남지 않게 함). **`RULE_IDS`는 소스 코드라서 이 스크립트가 되돌리지 않습니다** — 차이가 있으면 "git으로 직접 되돌리세요"라는 안내만 출력합니다.
+- **메모 한 건을 소유자·내용 해시로 대조해 복구하는 API를 추가했습니다.** 표는 `supabase/schema-notes-backup.sql`의 새 `public.notes_backup`(`source_note_id`·`owner_id`·`title`·`content`·`content_sha256`·`backed_up_at`)이며, `notes`·`announcements`와 같은 방식으로 RLS를 켜고 `anon`·`authenticated` 권한을 전부 회수했습니다 — 읽기는 서버 전용 키로만 합니다. 지금 메모를 백업표로 옮기는 예시 `INSERT`(pgcrypto의 `digest()`로 해시 계산)는 주석으로만 넣어 두었고 실행은 학생이 직접 합니다.
+  - `src/notes-restore-api.mjs`(`createNotesRestoreApi`)가 `POST /api/notes/:id/restore`를 처리합니다: ① 백업을 처음부터 `owner_id`로 좁혀 조회, ② 살아 있는 메모의 주인을 **소유자 조건 없이** 먼저 확인해 다른 사람 소유면 "없음"처럼 보이게 하는 대신 바로 404로 거부, ③ 쓰기 전에 `sha256(content)`를 백업의 `content_sha256`과 대조해 다르면 409, ④ 메모가 없으면 삽입·있으면 (여전히 `owner_id` 조건을 건) 수정 — `id` 하나만 보고 upsert하지 않는 이유는, 그랬다면 다른 사람 메모 id를 가리키는 위조 백업 행이 그 사람의 실제 메모를 덮어쓸 수 있기 때문입니다. 성공하면 `restoredFrom`(백업 시각)을 같이 돌려줍니다.
+  - `api/notes/[id]/restore.js`가 위 로직을 Vercel 서버 함수로 연결합니다(환경변수 `SUPABASE_URL`·`SUPABASE_SECRET_KEY` 없으면 500 `SERVER_NOT_CONFIGURED`).
+- **`src/decider.mjs`를 퍼징으로 검증하다가 실제 보안 버그를 찾아 고쳤습니다.** 상속된(프로토타입에만 있는) `deviceRegistered`·`signals`·`recentEvents`·`stepUp` 값이 `Object.prototype` 오염 등을 통해 주입되면, 평범한 속성 접근으로는 그 값이 "있는" 것처럼 읽혀 기기 등록 검사를 잘못 통과시킬 수 있었습니다. 모든 계약 필드 읽기를 `Object.hasOwn` 기반의 `ownValue()`로 바꿔 **자기 속성만** 읽도록 고쳤습니다(이미 있던 함수를 전수 점검해 빠진 자리를 막은 것이며, 새 함수를 추가한 것이 아닙니다). 던지는 getter·철회된 Proxy처럼 속성 접근 자체가 예외를 던지는 입력을 위해 `decide()`가 `evaluateRequest()`를 try/catch로 감싸고, 응답을 만들 수조차 없는 입력은 새 `reasonCode: 'malformed_request'`로 거부합니다(여전히 실패 시 닫힘). 정상적으로 생긴 요청의 동작은 전혀 바뀌지 않았습니다(아래 확인한 것).
+- **`src/decider.mjs`의 `ALLOWED_ROUTES`에 `'POST /notes/:id/restore'`를 추가했습니다.** `ANNOUNCEMENT_WRITE_ROUTES`(공지 쓰기 전면 거부 목록)와 `BULK_LIST_ROUTES`(전체 목록 거부 목록)는 건드리지 않았으므로, 이 새 경로는 `PUT /notes/:id`와 똑같이 기존 구역 일치·재인증 로직을 그대로 거칩니다. 다만 이 경로는 `:id` 다음에 `restore`라는 고정 문구가 한 조각 더 붙는 **새로운 모양**이라, 기존 `parseRoute`/`isZoneConsistent`는 목록(1조각)·`:id`(2조각) 두 모양만 알고 있어서 이 경로를 그대로 두면 `zone_mismatch`로 잘못 거부됐습니다. 두 함수를 최소로 넓혀 세 번째 모양(`zone`/`:id`/고정 접미사, 정확히 4조각)을 인식시켰고, 접미사 문자열은 `route` 문자열 자체에서 유도합니다(`'restore'`를 하드코딩하지 않음). 기존 두 모양의 판정 결과는 한 줄도 바뀌지 않았습니다 — 코드 안 주석(`src/decider.mjs`의 `parseRoute`·`isZoneConsistent` 바로 위)에 그대로 적어 두었습니다.
+- `src/attack-check.mjs`의 단계 가드를 `config.step < 5`(즉 "5단계부터 유효")로 그대로 두어 10단계도 통과시켰습니다 — 원래부터 `=== 5`가 아니라 `< 5`였고, 이번에 의도를 주석으로 분명히 적었습니다: 6~9단계가 추가한 판정기 규칙·탐지 로직은 5단계가 확립한 점검 대상(엔드포인트)을 하나도 없애거나 바꾸지 않았으므로, 10단계도 같은 자기 점검 목록을 그대로 재사용합니다.
+- `aleph.config.json`: `step`을 5에서 10으로 올렸고, `restoreRoute`를 `null`에서 `"POST /api/notes/:id/restore"`로 채웠으며, `allowedRoutes`에 같은 경로를 11번째로 추가했습니다(`/api` 접두어가 있는 이 목록은 판정기의 `ALLOWED_ROUTES`와 다른 네임스페이스입니다 — 8단계 메모 참고).
+
+이번 단계 카드가 요구한 "100점 받는 법" 세 가지를 다음과 같이 다뤘습니다(원문을 인용하는 것이 아니라 각 기준을 실제로 어떻게 확인했는지 적습니다):
+
+1. **새 설치가 깨끗하게 끝나야 합니다.** `git clone`을 그대로 쓰는 대신, 작업 트리 전체를 `node_modules`·`.git`·`artifacts`만 뺀 채 새 폴더에 복사하고 그 폴더에서 `npm install`을 처음부터 실행해 확인했습니다(아래 확인한 것에 실제 출력 인용). `package.json`의 의존성(`@supabase/supabase-js`, `jose`)은 이번 단계에서 바꾸지 않았습니다.
+2. **`decide()`는 절대 예외를 던지지 않고, 계약에 적힌 필드만 읽어야 합니다.** 위에서 적은 프로토타입 오염 수정과 `malformed_request` 안전망이 바로 이 기준을 위한 것입니다. 퍼징 결과: **"69/69 cases, 0 throws, 0 malformed responses"** — 임의로 비틀린 69개 입력(상속 속성, 던지는 getter, 순환 참조, 잘못된 타입 등) 전부에서 `decide()`가 예외 없이 다섯 항목(`schema`·`requestId`·`decision`·`reasonCode`·`ruleIds`) 모양을 지킨 응답을 돌려줬다는 뜻입니다.
+3. **`step`이 10으로 올라가 있어야 합니다.** `aleph.config.json`의 `"step": 10`으로 확인됩니다(위 변경 사항).
+
+- 한계:
+  - **실제 Supabase 설정은 하지 않았습니다.** `supabase/schema-notes-backup.sql`을 학생이 Supabase SQL Editor에서 직접 실행하고, `select * from pg_extension where extname = 'pgcrypto'`로 pgcrypto가 켜져 있는지 먼저 확인한 뒤, 주석으로 넣어 둔 백업용 `INSERT`를 직접 실행해야 합니다. 그 전까지는 `notes_backup`이 비어 있으므로 모든 복구 요청이 404로 끝납니다.
+  - 실제 교차 계정(B가 A의 메모 id로 복구를 시도) 시험은 인메모리 시뮬레이션으로만 했고, 두 개의 실제 로그인 계정으로 브라우저에서 시험하지 않았습니다 — 4·8단계 때와 같은 이유(실제 비밀번호를 대화에 쓰지 않기 위해서)의 동일한 한계입니다.
+  - Vercel이 `api/notes/[id]/restore.js`를 `api/notes/[id].js`와 함께 올바르게 라우팅하는지는 실제 배포로 확인하지 않았습니다.
+  - **이 저장소 어디에도 감사 기록(audit log) 표나 코드가 없습니다** — 검색으로 확인했습니다. 그러므로 "감사 기록을 보존했다"처럼 말하지 않습니다. 실제로 확인한 범위는 "복구 과정에서 다른 메모·다른 백업 행이 바이트 그대로 유지된다"는 것뿐이며, 이것이 감사 기록 보존을 뜻하지는 않습니다.
+- 확인한 것(이번 저장점 작업에서 새로 실행한 실제 결과):
+  ```
+  통과 · 등록 기기의 정상 요청
+  통과 · 미등록 기기의 가상 요청
+  통과 · 복합 이상 접속
+  통과 · 다시 확인한 복합 이상 접속
+  이 명령은 가상 요청으로 연습하며 심판 통과 증거가 아닙니다.
+  ```
+  (`npm run decider:test`, `POST /notes/:id/restore` 추가 뒤에도 종료 코드 0, 네 항목 모두 통과 — 회귀 없음.) `npm run fixture:7`도 다시 실행했습니다:
+  ```
+  정상 사건: allow
+  복합 이상 사건: step_up
+  ```
+  새 경로의 구역 일치 수정이 맞는지 보려고 즉석(커밋하지 않은) `node --input-type=module -e` 점검도 했습니다(네 가지 모두 예상과 일치):
+  ```
+  well-formed POST /notes/:id/restore => decision:"allow", reasonCode:"device_registered"
+  같은 route, path에 /restore가 빠짐 => decision:"deny", reasonCode:"zone_mismatch"
+  같은 route, path 끝이 다른 문구(/export) => decision:"deny", reasonCode:"zone_mismatch"
+  영향 없어야 할 기존 경로 PUT /notes/:id => decision:"allow", reasonCode:"device_registered"
+  ```
+  새 폴더에 작업 트리를 복사해 처음부터 `npm install`을 실행한 결과: `added 10 packages, and audited 11 packages in 1s` / `found 0 vulnerabilities`, 종료 코드 0 — 오류 없이 끝났습니다.
+  그 밖에, 구현 당시 실행해 두고 이번 저장점 보고를 위해 다시 실행하지는 않은 결과를 9단계와 같은 방식으로 그대로 인용합니다: 판정기 퍼징 "69/69 cases, 0 throws, 0 malformed responses"(위 기준 2), `npm run detect:test` 6/6, `npm run test:notes` 8/8, `npm run test:r5` 3/3, `npm run test:package` 3/3, `npm run test:auth` 5/5 — 전부 통과로 보고됐습니다. 메모 복구 API의 즉석(인메모리) BOLA 시험 12건도 모두 PASS로 보고됐습니다: 소유자가 자기 메모 복구, 소유자가 아니면 404, 위조한 남의 소유 백업은 404이고 실제 소유자의 메모는 덮어쓰지 않음, 해시가 변조된 백업은 409, 백업이 없으면 404, 지워진 메모는 같은 id로 다시 생성됨, 로그인 없으면 401, 허용되지 않은 방법은 405, UUID가 아닌 id는 404, 다른 메모·다른 백업 행은 그대로 유지됨.
+- 확인하지 못한 것: 이번 10단계는 아직 실제 심판에 제출하지 않았습니다. 위 결과는 모두 로컬(또는 인메모리) 통과일 뿐 심판 채점이 아닙니다 — 8단계가 로컬 통과 뒤 실제 채점에서 48/100을 받았던 경험이 있으므로, 이번에도 로컬 통과를 심판 통과의 증거로 말하지 않습니다.
+- 다시 실행하는 방법: `npm run decider:test`, `npm run fixture:7`, `npm run detect:test`, `npm run test:notes`, `npm run test:r5`, `npm run test:package`, `npm run test:auth`, `node scripts/policy-diff.mjs`, `node scripts/policy-restore.mjs`(드라이런), `node scripts/policy-restore.mjs --confirm`.

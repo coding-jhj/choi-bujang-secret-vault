@@ -42,8 +42,15 @@ async function publicFilesKeyScan(url) {
   }
 }
 
+// Valid for any step from 5 onward. Every probe below (notes/announcements no-login and
+// forged-token rejection, original DB API no-key read/write, public key-string scan,
+// bad-credential login, /data.json closed, /aleph.json open, nosniff header) targets an
+// endpoint or behavior that steps 6-9 kept unchanged: those steps added decider rules and
+// detection on top, and none of them removed or replaced a probed endpoint. Step-10
+// recovery work must keep these endpoints too; if it changes one, update the probe here.
+// Below step 5 the original-API probes have no originalApiUrl to test, so it still throws.
 export async function runAttackChecks(config) {
-  if (config.step !== 5) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
+  if (!Number.isInteger(config.step) || config.step < 5) throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   let app;
   try {
     app = new URL(config.publicAppUrl);

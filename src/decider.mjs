@@ -3,7 +3,8 @@
 // 요청 본문의 userId, role, 기기 키, 토큰을 별도로 믿거나 저장하지 마세요.
 
 // device_registered rule:
-// - Allows only when the contract field `deviceRegistered` is exactly boolean `true`.
+// - Allows only when the contract field `deviceRegistered` is an OWN property that is
+//   exactly boolean `true` (an inherited / prototype-polluted value does not count).
 // - Anything else (false, missing, null, "true", 1, non-object request) denies (fail closed).
 // - This rule does NOT enforce device enrollment itself. Enrollment is enforced
 //   upstream at the relay before this decider is called; per docs/DECIDER_REQUEST.md,
@@ -112,6 +113,7 @@ const ALLOWED_ROUTES = Object.freeze([
   'GET /announcements/:id',
   'PUT /announcements/:id',
   'DELETE /announcements/:id',
+  'POST /notes/:id/restore',
 ]);
 
 // No role exists in the request contract, so these are denied for everyone (see header).
@@ -156,7 +158,7 @@ function finiteNumberOrUndefined(value) {
 // Whitelist-only copy of the four documented signal keys. Any other property
 // (e.g. a forged `trusted` or `adminOverride`) is dropped, never surfaced.
 function readSignals(request) {
-  const raw = request.signals;
+  const raw = ownValue(request, 'signals');
   if (!isPlainObject(raw)) {
     return { source: undefined, region: undefined, network: undefined, hour: undefined };
   }
@@ -169,19 +171,27 @@ function readSignals(request) {
 }
 
 // Whitelist-only copy of at most 12 documented recentEvents entries.
+// Indexed loop instead of raw.slice/filter/map: the array's own methods (or a
+// Symbol.species constructor) are never invoked, and at most 12 indices are read
+// no matter how long the array claims to be.
 function readRecentEvents(request) {
-  const raw = request.recentEvents;
+  const raw = ownValue(request, 'recentEvents');
   if (!Array.isArray(raw)) {
     return [];
   }
-  return raw
-    .slice(0, MAX_RECENT_EVENTS)
-    .filter(isPlainObject)
-    .map((event) => ({
-      kind: stringOrUndefined(ownValue(event, 'kind')),
-      ageSeconds: finiteNumberOrUndefined(ownValue(event, 'ageSeconds')),
-      count: finiteNumberOrUndefined(ownValue(event, 'count')),
-    }));
+  const limit = Math.min(raw.length, MAX_RECENT_EVENTS);
+  const events = [];
+  for (let index = 0; index < limit; index += 1) {
+    const event = ownValue(raw, index);
+    if (isPlainObject(event)) {
+      events.push({
+        kind: stringOrUndefined(ownValue(event, 'kind')),
+        ageSeconds: finiteNumberOrUndefined(ownValue(event, 'ageSeconds')),
+        count: finiteNumberOrUndefined(ownValue(event, 'count')),
+      });
+    }
+  }
+  return events;
 }
 
 function isAnomalous(signals, recentEvents) {
@@ -200,14 +210,30 @@ function isAnomalous(signals, recentEvents) {
 
 // Splits an allowlisted route ('GET /notes/:id') into its parts. Only ever called on a
 // string already present in ALLOWED_ROUTES, so the shape is known.
+//
+// 10단계 추가: 'POST /notes/:id/restore'처럼 ':id' 다음에 고정 문구가 한 조각 더 붙는 모양도
+// 있습니다. segments.length로 세 모양을 구분합니다: 1=목록('notes'), 2=':id'
+// 경로('notes',':id'), 3=':id' + 고정 접미사('notes',':id','restore'). suffix는 세 번째
+// 모양일 때만 그 고정 문구('restore')를 담고, 나머지 두 모양에서는 undefined입니다. 이
+// 특정 경로를 문자열로 하드코딩하지 않고 route 문자열 자체에서 유도하므로, 같은 모양의
+// 경로가 나중에 추가돼도 이 함수를 다시 바꿀 필요가 없습니다.
 function parseRoute(route) {
   const [method, routePath] = route.split(' ');
   const segments = routePath.split('/').slice(1); // drop the '' before the leading '/'
-  return { method, zone: segments[0], hasId: segments.length === 2 };
+  const zone = segments[0];
+  if (segments.length === 3) {
+    return { method, zone, hasId: true, suffix: segments[2] };
+  }
+  return { method, zone, hasId: segments.length === 2, suffix: undefined };
 }
 
 // True only when method, service and path all agree with the parsed route.
 // Any missing / wrong-typed / malformed field is a mismatch (fail closed).
+//
+// 10단계 추가: parsed.suffix가 있으면(예: 'restore') path는 '/<zone>/<id 한 조각>/<suffix>'
+// 모양(정확히 4조각)이어야 통과합니다. id 조각 검사(PATH_ID_SEGMENT)는 기존 ':id' 분기와
+// 동일하게 적용되고, 마지막 조각은 suffix 문자열과 정확히 같아야 합니다. suffix가 없는
+// 기존 두 모양(목록 / ':id')의 동작은 전혀 바뀌지 않았습니다.
 function isZoneConsistent(request, parsed) {
   const method = stringOrUndefined(ownValue(request, 'method'));
   const service = stringOrUndefined(ownValue(request, 'service'));
@@ -222,11 +248,14 @@ function isZoneConsistent(request, parsed) {
   if (!parsed.hasId) {
     return segments.length === 2;
   }
+  if (parsed.suffix !== undefined) {
+    return segments.length === 4 && PATH_ID_SEGMENT.test(segments[2]) && segments[3] === parsed.suffix;
+  }
   return segments.length === 3 && PATH_ID_SEGMENT.test(segments[2]);
 }
 
 function isReverified(request) {
-  const stepUp = request.stepUp;
+  const stepUp = ownValue(request, 'stepUp');
   if (!isPlainObject(stepUp)) {
     return false;
   }
@@ -239,11 +268,55 @@ function isReverified(request) {
   );
 }
 
-export async function decide(request) {
-  const isObject = typeof request === 'object' && request !== null;
-  const requestId = isObject ? request.requestId : undefined;
+// Echoes requestId exactly as the contract says ("응답에 그대로 돌려줍니다"). It is
+// never a decision input. Read once. Throws if the read itself throws, so decide()
+// can deny a request whose id cannot even be read.
+function readRequestId(request) {
+  if (typeof request !== 'object' || request === null) {
+    return undefined;
+  }
+  return request.requestId;
+}
 
-  if (!isObject || request.deviceRegistered !== true) {
+// Last-resort safety net (see decide()). Reuses the device_registered gate's
+// fail-closed posture: a request that cannot be read is not a contract request.
+function malformedRequestDeny(requestId) {
+  return {
+    schema: SCHEMA,
+    requestId,
+    decision: 'deny',
+    reasonCode: 'malformed_request',
+    ruleIds: [RULE_DEVICE_REGISTERED],
+  };
+}
+
+// decide() must return a well-formed response for EVERY input and never reject.
+// All field reads below are own-property, type-checked and bounded, so plain data
+// of any shape (wrong types, huge strings/arrays, circular references, frozen or
+// sealed objects) is handled by the rules themselves. What logic alone cannot
+// neutralize is an object whose property access RUNS CODE: a throwing getter, a
+// Proxy with throwing traps, a revoked Proxy. Any read of such an object may throw,
+// so evaluateRequest() is wrapped and an internal error becomes a deny (fail
+// closed). The real engine sends plain JSON, so this path is for hostile/virtual
+// inputs only; it never turns an error into an allow.
+export async function decide(request) {
+  let requestId;
+  try {
+    requestId = readRequestId(request);
+  } catch {
+    return malformedRequestDeny(undefined);
+  }
+  try {
+    return evaluateRequest(request, requestId);
+  } catch {
+    return malformedRequestDeny(requestId);
+  }
+}
+
+function evaluateRequest(request, requestId) {
+  const isObject = typeof request === 'object' && request !== null;
+
+  if (!isObject || ownValue(request, 'deviceRegistered') !== true) {
     return {
       schema: SCHEMA,
       requestId,

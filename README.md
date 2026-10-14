@@ -317,3 +317,22 @@
     test:r5 3/3, test:package 3/3, test:auth 5/5 — 전부 종료 코드 0
   ```
 - 다시 실행하는 방법: `npm run test:notes`.
+
+### 보완 5: 복구 뒤 재시험 자동화 (S10_RETEST_MISSING 대응)
+
+- **`scripts/post-restore-retest.mjs`는 배포된 사이트에서 "복구 뒤 정상·금지 요청 재시험"을 자동으로 하는 로컬 전용 도구입니다.** Supabase 서버 전용 키(`SUPABASE_SECRET_KEY`)로 example.invalid 같은 사용할 수 없는(IANA 예약) 도메인의 임시 계정 두 개(A'·B')를 스스로 만들고 로그인한 뒤, 실제 배포된 `/api/*` 경로를 로그인한 사용자처럼 `fetch()`로 그대로 호출합니다. 끝나면 try/finally(Ctrl+C로 중단해도 포함)로 만든 것 — 메모·백업·감사 행·임시 계정 2개 — 를 전부 지웁니다. 확인하는 9가지: ① 로그인 없는 목록 조회·복구 요청은 모두 401로 거부, ② A'가 자기 메모를 만듦, ③ B'가 A'의 메모를 읽으면 404, ④ B'가 A'의 메모를 고치면 404이고 A'의 메모는 그대로임, ⑤ B'가 자기 메모를 만듦(서버가 생성 시점 백업), ⑥ B'가 자기 메모를 변조, ⑦ B'가 복구하면 변조 전 원본으로 돌아오고 `audit: "recorded"`, ⑧ A'의 메모는 B'의 모든 시도 뒤에도 그대로 조회됨, ⑨ A'가 B'의 메모를 복구하려 하면 404로 거부됨.
+- **이 스크립트는 `npm run bundle`에 포함되지 않고, Vercel에 이미 설정된 것 이상의 Supabase 자격 증명을 요구하지 않습니다.** 서비스 역할(`service_role`) 키는 학생의 셸 환경 변수로만 들어오고, 이 저장소의 어떤 파일·커밋에도 쓰지 않습니다.
+- **실행 방법 (학생이 자기 컴퓨터에서, 자기 키로 직접 실행):**
+  ```
+  $env:SUPABASE_URL="https://<project>.supabase.co"; $env:SUPABASE_SECRET_KEY="<Supabase 대시보드의 service_role 키>"
+  node scripts/post-restore-retest.mjs
+  Remove-Item Env:SUPABASE_SECRET_KEY
+  ```
+  두 값은 Supabase 대시보드 → Project Settings → API에서 가져옵니다 — Vercel 환경 변수에 넣을 때 이미 썼던 바로 그 값과 같은 위치입니다. **`SUPABASE_SECRET_KEY` 값은 채팅·파일·커밋에 절대 넣지 마세요.** 실행이 끝나면 위 `Remove-Item`으로 이 셸 세션에서 지우는 것을 권합니다.
+- 확인한 것(이 도구를 만들며 수행한 검증 결과 — 실제 Supabase 접근이 없는 이번 작업 범위에서는 아래 명령을 다시 실행하지 않고 그 결과를 그대로 옮겨 적습니다): 라이브 시험이 아니라, 실제 `src/notes-api.mjs`·`src/notes-restore-api.mjs` 핸들러 코드를 인메모리 가짜 저장소에 연결해 **로직·제어 흐름만** 점검했습니다. 5가지 시나리오 모두 의도대로 동작했습니다 — 정상 경로: 9개 점검 전부 통과(9/9); 버그를 일부러 주입한 경로: 정확히 6/9로 보고하고 실패한 3건을 정확히 지적; 준비(임시 계정 생성) 자체가 실패하는 경로: 그래도 그때까지 만든 것은 정리됨; 실행 중간에 예외가 나는 경로: finally로 정리가 그래도 실행됨; SUPABASE_URL이 `aleph.config.json`의 Supabase 프로젝트와 다른 경로: 아무것도 만들기 전에 거부됨. 이 파일은 어디서도 import되지 않으므로 기존 회귀 스위트는 영향을 받지 않고 그대로 통과했습니다:
+  ```
+  decider:test 4/4, fixture:7 pass, detect:test 6/6, test:notes 15/15,
+    test:r5 3/3, test:package 3/3, test:auth 5/5 — 전부 종료 코드 0
+  ```
+- **확인하지 못한 것 (중요): 실제로 배포된 사이트에 학생의 실제 Supabase 자격 증명으로 이 스크립트를 실행한 적은 없습니다.** 이 작업 세션에는 Supabase 접근 권한이 전혀 주어지지 않아 실행 자체가 불가능했고, 이것은 오직 학생이(또는 실행할 수 있다면 심판이) 자기 키로 직접 실행해야만 확인됩니다. 그러므로 이 보완이 **`S10_RETEST_MISSING`을 해소했다고 주장하지 않습니다.** 바뀐 것은 "재시험이 이제 자동화된 도구로 존재하고, 그 결과가 이 카드가 금지한 '미실행을 결과로 채웠습니다'가 아니라 실제 통과/실패로 채워질 수 있게 됐다"는 것뿐이며, 통과 여부는 실행 전까지 알 수 없습니다.
+- 다시 실행하는 방법: `node scripts/post-restore-retest.mjs` (학생 본인의 `SUPABASE_URL`·`SUPABASE_SECRET_KEY` 환경 변수가 먼저 설정되어 있어야 하며, 이 저장소 밖에서 학생이 직접 설정합니다).

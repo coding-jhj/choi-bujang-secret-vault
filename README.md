@@ -198,9 +198,9 @@
 
 ## 10단계: 백업에서 자료실을 되살립니다
 
-- **정책을 침해 전 상태로 비교·복원하는 도구를 추가했습니다.** `backups/policy-snapshot.json`은 `RULE_IDS`(`src/decider.mjs`)·`allowedRoutes`·`identityProvider`(`aleph.config.json`) 세 값만 담은 자기 검증(self-verifying) 사본입니다. 사본 자신의 `sha256` 칸은 나머지 값을 키 정렬 규범형 JSON으로 직렬화한 뒤 SHA-256을 구해 적은 것으로(`scripts/policy-diff.mjs`의 `canonicalJson`·`computeSnapshotHash`), 누가 파일을 고쳐도 해시가 맞지 않으면 바로 드러납니다 — 서명은 아니며 신뢰의 뿌리는 이 사본이 Git 기록에 커밋되어 있다는 사실입니다.
-  - `scripts/policy-diff.mjs`: 사본을 읽어 형식과 해시를 먼저 검증하고(누락·손상·변조 시 즉시 중단하고 오류 메시지만 남김), 지금 `aleph.config.json`·`RULE_IDS`와 세 항목을 각각 비교해 차이를 한글로 보여 줍니다. 복원 실행 **전에** "복원할 버전과 변경 범위"를 먼저 보여 주는 용도입니다.
-  - `scripts/policy-restore.mjs`: 기본은 드라이런(아무것도 쓰지 않고 바뀔 내용만 보여 줌)이며, `--confirm`을 붙여야 `aleph.config.json`의 `allowedRoutes`·`identityProvider`만 사본 값으로 덮어씁니다(다른 칸·들여쓰기·줄바꿈 문자는 그대로 유지, 임시 파일에 쓴 뒤 바꿔치기해 중간에 깨진 파일이 남지 않게 함). **`RULE_IDS`는 소스 코드라서 이 스크립트가 되돌리지 않습니다** — 차이가 있으면 "git으로 직접 되돌리세요"라는 안내만 출력합니다.
+- **"정책"을 다시 Supabase RLS POLICY로 놓고, 비교·복원 도구를 바로잡았습니다.** 이 저장소는 4단계부터 "정책"을 `public.notes`에 걸린 4개의 이름 있는 Supabase RLS POLICY 객체(`notes_select_own`·`notes_insert_own`·`notes_update_own`·`notes_delete_own`, 전부 `supabase/rls-stage4.sql`에 정의됨)로 써 왔습니다. B의 요청은 거부되고 A의 요청은 허용되는 것을 실제로 결정하는 메커니즘이 바로 이 정책이며, 새 도구는 이 파일을 신뢰 기준으로 삼습니다. 신뢰의 뿌리는 자체 해시가 아니라 **git 자체의 "바뀌지 않았다" 판정**입니다: `rls-stage4.sql`의 작업 트리 블롭 해시(`git hash-object`)가 커밋된 블롭(`git rev-parse HEAD:supabase/rls-stage4.sql`)과 같을 때만 기준으로 신뢰합니다 — 단순 바이트 비교를 쓰지 않은 이유는 `core.autocrlf` 체크아웃에서는 작업 트리가 CRLF, 커밋된 블롭이 LF라서 손대지 않은 파일도 "바뀜"으로 잘못 판정되기 때문입니다(`git status`가 쓰는 것과 같은 규칙).
+  - `scripts/policy-check.mjs`: 위 방식으로 `rls-stage4.sql`을 검증한 뒤(누락·git 미추적·HEAD와 불일치·정책 문장 없음 중 하나라도면 즉시 중단), 파일에서 정책 4개의 이름·대상 표·명령(cmd)을 그대로 읽어 보여 줍니다. 지금 Supabase에 실제로 적용된 정책이 이와 같은지는 기존 `supabase/rls-stage4-check.sql`을 SQL Editor에서 실행해 직접 대조하라고 안내합니다. Supabase에 접속하지 않고 SQL도 실행하지 않습니다.
+  - `scripts/policy-restore-plan.mjs`: `policy-check.mjs`의 검증을 그대로 재사용해 **복원을 실행하기 전에** 무엇이 바뀔지 보여 줍니다 — `rls-stage4.sql`을 Supabase SQL Editor에서 다시 실행하는 것이 바로 복원 절차이며(파일이 `drop policy if exists` 뒤에 다시 만드는 구조라 몇 번 실행해도 안전합니다), 정책 4개를 지우고 같은 정의로 다시 만드는 것과 RLS·권한 문장 3개를 다시 적용한다는 것, 그리고 파일 안 `public.*` 이름을 전부 세어 `public.notes` 한 표만 건드린다는 것을 미리 보여 줍니다. 이 스크립트도 SQL을 실행하지 않고 Supabase에 접속하지 않습니다.
 - **메모 한 건을 소유자·내용 해시로 대조해 복구하는 API를 추가했습니다.** 표는 `supabase/schema-notes-backup.sql`의 새 `public.notes_backup`(`source_note_id`·`owner_id`·`title`·`content`·`content_sha256`·`backed_up_at`)이며, `notes`·`announcements`와 같은 방식으로 RLS를 켜고 `anon`·`authenticated` 권한을 전부 회수했습니다 — 읽기는 서버 전용 키로만 합니다. 지금 메모를 백업표로 옮기는 예시 `INSERT`(pgcrypto의 `digest()`로 해시 계산)는 주석으로만 넣어 두었고 실행은 학생이 직접 합니다.
   - `src/notes-restore-api.mjs`(`createNotesRestoreApi`)가 `POST /api/notes/:id/restore`를 처리합니다: ① 백업을 처음부터 `owner_id`로 좁혀 조회, ② 살아 있는 메모의 주인을 **소유자 조건 없이** 먼저 확인해 다른 사람 소유면 "없음"처럼 보이게 하는 대신 바로 404로 거부, ③ 쓰기 전에 `sha256(content)`를 백업의 `content_sha256`과 대조해 다르면 409, ④ 메모가 없으면 삽입·있으면 (여전히 `owner_id` 조건을 건) 수정 — `id` 하나만 보고 upsert하지 않는 이유는, 그랬다면 다른 사람 메모 id를 가리키는 위조 백업 행이 그 사람의 실제 메모를 덮어쓸 수 있기 때문입니다. 성공하면 `restoredFrom`(백업 시각)을 같이 돌려줍니다.
   - `api/notes/[id]/restore.js`가 위 로직을 Vercel 서버 함수로 연결합니다(환경변수 `SUPABASE_URL`·`SUPABASE_SECRET_KEY` 없으면 500 `SERVER_NOT_CONFIGURED`).
@@ -243,7 +243,7 @@
   새 폴더에 작업 트리를 복사해 처음부터 `npm install`을 실행한 결과: `added 10 packages, and audited 11 packages in 1s` / `found 0 vulnerabilities`, 종료 코드 0 — 오류 없이 끝났습니다.
   그 밖에, 구현 당시 실행해 두고 이번 저장점 보고를 위해 다시 실행하지는 않은 결과를 9단계와 같은 방식으로 그대로 인용합니다: 판정기 퍼징 "69/69 cases, 0 throws, 0 malformed responses"(위 기준 2), `npm run detect:test` 6/6, `npm run test:notes` 8/8, `npm run test:r5` 3/3, `npm run test:package` 3/3, `npm run test:auth` 5/5 — 전부 통과로 보고됐습니다. 메모 복구 API의 즉석(인메모리) BOLA 시험 12건도 모두 PASS로 보고됐습니다: 소유자가 자기 메모 복구, 소유자가 아니면 404, 위조한 남의 소유 백업은 404이고 실제 소유자의 메모는 덮어쓰지 않음, 해시가 변조된 백업은 409, 백업이 없으면 404, 지워진 메모는 같은 id로 다시 생성됨, 로그인 없으면 401, 허용되지 않은 방법은 405, UUID가 아닌 id는 404, 다른 메모·다른 백업 행은 그대로 유지됨.
 - 확인하지 못한 것: 이번 10단계는 아직 실제 심판에 제출하지 않았습니다. 위 결과는 모두 로컬(또는 인메모리) 통과일 뿐 심판 채점이 아닙니다 — 8단계가 로컬 통과 뒤 실제 채점에서 48/100을 받았던 경험이 있으므로, 이번에도 로컬 통과를 심판 통과의 증거로 말하지 않습니다.
-- 다시 실행하는 방법: `npm run decider:test`, `npm run fixture:7`, `npm run detect:test`, `npm run test:notes`, `npm run test:r5`, `npm run test:package`, `npm run test:auth`, `node scripts/policy-diff.mjs`, `node scripts/policy-restore.mjs`(드라이런), `node scripts/policy-restore.mjs --confirm`.
+- 다시 실행하는 방법: `npm run decider:test`, `npm run fixture:7`, `npm run detect:test`, `npm run test:notes`, `npm run test:r5`, `npm run test:package`, `npm run test:auth`, `node scripts/policy-check.mjs`, `node scripts/policy-restore-plan.mjs`.
 
 ### 보완: 심판 제출 결과(UNV_AMBIGUOUS) 반영
 
@@ -251,3 +251,23 @@
 - `curl`로 실제 배포된 `/aleph.json`을 직접 조회해 원인을 진단했습니다: `aleph.config.json`에는 `restoreRoute`가 `"POST /api/notes/:id/restore"`로 채워져 있었지만, 배포된 `/aleph.json`에는 최상위 `restoreRoute` 키가 **빠져 있었습니다**. 원인은 `scripts/deployment-identity.mjs`의 `deploymentIdentity()`가 애초에 그 값을 출력 객체에 복사하는 코드가 없었기 때문입니다(10단계 구현 당시의 누락).
 - 기존 `originalApiUrl`·`allowedRoutes`의 5단계 이상 검사와 같은 fail-closed 패턴으로 고쳤습니다: `step >= 10`이면 `config.restoreRoute`가 올바른 형식의 경로 문자열인지 검사하고(아니면 예외를 던져 막음), 통과할 때만 `{ restoreRoute: config.restoreRoute }`를 결과 객체에 포함합니다. `step`이 10 미만이면 이 키 자체가 없으며, 수정 전 동작과 완전히 같습니다.
 - **이 수정은 아직 실제로 재배포·재채점되지 않았습니다.** 푸시 이후 배포된 `/aleph.json`에 `restoreRoute` 키가 실제로 나타나는지 다시 확인해야 하고, 심판에도 다시 제출해 `UNV_AMBIGUOUS`가 해소되는지 확인해야 합니다.
+
+### 보완 2: "정책" 해석 수정
+
+- 위 10단계의 1차 제출은 "정책"을 `RULE_IDS`(`src/decider.mjs`)·`allowedRoutes`·`identityProvider`(`aleph.config.json`) 세 설정값의 새로운 조합으로 잘못 읽고, 그 값들만 비교·복원하는 도구(`backups/policy-snapshot.json`, `scripts/policy-diff.mjs`, `scripts/policy-restore.mjs`)를 만들었습니다. 이 도구는 이번 단계 카드의 제작 2 확인 문장(복원 뒤 B의 요청은 거부되고 A의 요청은 허용되는지 확인)이 실제로 요구한 것과 무관했고, 그 결과 실제 심판 채점에서 `UNV_AMBIGUOUS`(심판이 판단을 보류함, 실패로 채점된 것은 아님)를 두 차례 받았습니다.
+- 근본 원인: 이 저장소는 **4단계부터** "정책"을 `public.notes`에 걸린 4개의 이름 있는 Supabase RLS POLICY 객체(`supabase/rls-stage4.sql`에 정의된 `notes_select_own`·`notes_insert_own`·`notes_update_own`·`notes_delete_own`)로 써 왔습니다. B의 요청을 거부하고 A의 요청을 허용하는 것을 실제로 결정하는 메커니즘은 바로 이 RLS 정책이며, 지워진 도구가 다루던 설정값들은 그 동작과 아무 관계가 없었습니다.
+- 수정: 범위를 잘못 잡은 도구(`backups/policy-snapshot.json`·`scripts/policy-diff.mjs`·`scripts/policy-restore.mjs`)를 모두 지우고, 4단계부터 이미 검증되어 있는 `rls-stage4.sql`/`rls-stage4-check.sql` 쌍을 가리키기만 하는 `scripts/policy-check.mjs`·`scripts/policy-restore-plan.mjs`로 바꿨습니다 — 그 idempotent한(몇 번 실행해도 결과가 같은) SQL 파일을 다시 실행하는 것 자체가 복원 절차이기 때문입니다. 실제로 실행한 `node scripts/policy-check.mjs`의 출력을 그대로 인용합니다:
+  ```
+  복원 기준: supabase/rls-stage4.sql (git HEAD와 일치 확인됨)
+    blob 0a3d02465590 · 마지막 변경 커밋: ad5e69d 4단계 제작 3: notes RLS·최소 권한 SQL 추가
+  기대하는 정책 4개: notes_select_own, notes_insert_own, notes_update_own, notes_delete_own
+    - notes_select_own: public.notes · cmd=select
+    - notes_insert_own: public.notes · cmd=insert
+    - notes_update_own: public.notes · cmd=update
+    - notes_delete_own: public.notes · cmd=delete
+
+  지금 실제 Supabase에 적용된 정책을 보려면 supabase/rls-stage4-check.sql을 SQL Editor에서 실행하세요.
+  결과에 위 4개 정책 이름이 전부 있고, 각 cmd(select/insert/update/delete)가 올바르면 차이가 없는 것입니다.
+  이 스크립트는 Supabase에 접속하지 않습니다. 로컬 기준 사본의 무결성만 확인합니다.
+  ```
+- **이 수정은 새 심판 피드백이 아니라 자기 교정입니다.** 심판이 `UNV_AMBIGUOUS`를 낸 정확한 이유는 화면에 reasonCode와 일반적인 설명만 보였고, 요청·응답 세부 내용은 끝까지 보이지 않았습니다. 위 해석은 이 저장소가 4단계부터 써 온 "정책" 용어 사용 패턴에 근거한 추론일 뿐 확인된 사실이 아니며, 다시 제출해 `UNV_AMBIGUOUS`가 해소되는지로만 검증됩니다.

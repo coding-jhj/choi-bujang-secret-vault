@@ -125,10 +125,15 @@ test('Supabase 저장소는 content 칸을 body로 바꿔 돌려주고 DB 오류
 
 // A fake Supabase client that really stores and filters rows per table, so the real
 // createSupabaseStore code paths (insert/select/update/eq/order/limit/single) run against it.
-function fakeSupabase({ failInsert = [] } = {}) {
+// pgUuid: behave like Postgres uuid columns — values are stored lowercase and compared
+// case-insensitively, so a mixed-case uuid from a token still matches the stored row.
+function fakeSupabase({ failInsert = [], pgUuid = false } = {}) {
   const tables = {};
   let seq = 0;
   const defaults = { notes: 'created_at', notes_backup: 'backed_up_at', restore_audit: 'restored_at' };
+  const UUID_COLS = new Set(['id', 'owner_id', 'source_note_id', 'note_id', 'restored_backup_id']);
+  const norm = (k, v) => (pgUuid && UUID_COLS.has(k) && typeof v === 'string' ? v.toLowerCase() : v);
+  const normRow = p => Object.fromEntries(Object.entries(p).map(([k, v]) => [k, norm(k, v)]));
   const client = {
     tables,
     from(table) {
@@ -160,10 +165,10 @@ function fakeSupabase({ failInsert = [] } = {}) {
       };
       const q = {
         select(c) { cols = c; return q; },
-        insert(p) { op = 'insert'; payload = p; return q; },
-        update(p) { op = 'update'; payload = p; return q; },
+        insert(p) { op = 'insert'; payload = normRow(p); return q; },
+        update(p) { op = 'update'; payload = normRow(p); return q; },
         delete() { op = 'delete'; return q; },
-        eq(k, v) { filters.push([k, v]); return q; },
+        eq(k, v) { filters.push([k, norm(k, v)]); return q; },
         order(k, { ascending }) { order = [k, ascending]; return q; },
         limit(n) { limit = n; return q; },
         single: async () => exec('single'),
@@ -237,6 +242,79 @@ test('10단계: 만들고 → PUT으로 변조 → 복구하면 원래 내용이
   assert.deepEqual({ note_id: audit.note_id, owner_id: audit.owner_id, restored_backup_id: audit.restored_backup_id },
     { note_id: id, owner_id: B, restored_backup_id: db.tables.notes_backup.find(b => b.source_note_id === id).id });
   assert.deepEqual({ a: db.tables.notes.find(n => n.id === other), backups: db.tables.notes_backup }, untouched);
+});
+
+// S10_RESTORE_MISMATCH regression: restore only when id, owner and content hash all match the copy.
+const verifyMixed = async authorization => {
+  if (authorization === 'Bearer judge-b-upper') return { kind: 'judge', userId: B.toUpperCase(), runId: A, identity: 'b' };
+  return verify(authorization);
+};
+
+test('10단계: 응답은 저장된 행의 id·소유자·내용 해시를 돌려주고 세 값이 사본과 같다', async () => {
+  const db = fakeSupabase({ pgUuid: true });
+  const notes = createNotesApi({ verify, store: createSupabaseStore(db) });
+  const restore = createNotesRestoreApi({ verify, store: createRestoreStore(db) });
+  const { id } = (await call(notes.collection, { method: 'POST', token: 'user-b', body: { title: 'B', body: '원본 내용' } })).body;
+  await call(notes.item, { method: 'PUT', token: 'user-b', query: { id }, body: { title: '변조', body: '변조' } });
+  const restored = await call(restore.item, { method: 'POST', token: 'user-b', query: { id } });
+  assert.equal(restored.status, 200);
+  const [copy] = db.tables.notes_backup;
+  const live = db.tables.notes.find(n => n.id === id);
+  assert.deepEqual({ id: restored.body.id, ownerId: restored.body.ownerId, contentSha256: restored.body.contentSha256 },
+    { id: copy.source_note_id, ownerId: copy.owner_id, contentSha256: copy.content_sha256 });
+  assert.deepEqual({ id: live.id, owner: live.owner_id, hash: hex(live.content) },
+    { id: copy.source_note_id, owner: copy.owner_id, hash: copy.content_sha256 });
+});
+
+test('10단계: 대소문자가 다른 같은 uuid의 주체(심판 sub)도 자기 메모를 복구한다', async () => {
+  const db = fakeSupabase({ pgUuid: true });
+  const notes = createNotesApi({ verify: verifyMixed, store: createSupabaseStore(db) });
+  const restore = createNotesRestoreApi({ verify: verifyMixed, store: createRestoreStore(db) });
+  const { id } = (await call(notes.collection, { method: 'POST', token: 'judge-b-upper', body: { title: 'B', body: 'B 원본' } })).body;
+  assert.equal((await call(notes.item, { method: 'PUT', token: 'judge-b-upper', query: { id }, body: { title: 'x', body: '변조' } })).status, 200);
+  const restored = await call(restore.item, { method: 'POST', token: 'judge-b-upper', query: { id } });
+  assert.equal(restored.status, 200);
+  assert.equal(db.tables.notes.find(n => n.id === id).content, 'B 원본');
+  assert.equal(db.tables.restore_audit.length, 1);
+  // Still owner-scoped: a different user is refused and nothing is written.
+  assert.equal((await call(restore.item, { method: 'POST', token: 'user-a', query: { id } })).status, 404);
+  assert.equal(db.tables.restore_audit.length, 1);
+});
+
+test('10단계: 사본의 id·소유자가 요청과 다르면 쓰기 전에 409로 멈춘다', async () => {
+  const db = fakeSupabase({ pgUuid: true });
+  const notes = createNotesApi({ verify, store: createSupabaseStore(db) });
+  const { id } = (await call(notes.collection, { method: 'POST', token: 'user-b', body: { title: 'B', body: 'B 원본' } })).body;
+  await call(notes.item, { method: 'PUT', token: 'user-b', query: { id }, body: { title: 'x', body: '변조' } });
+  for (const lie of [{ ownerId: A }, { sourceNoteId: '00000000-0000-4000-8000-00000000abcd' }]) {
+    const store = createRestoreStore(db);
+    const real = store.findBackup;
+    store.findBackup = async (...args) => ({ ...(await real(...args)), ...lie });
+    const result = await call(createNotesRestoreApi({ verify, store }).item, { method: 'POST', token: 'user-b', query: { id } });
+    assert.deepEqual([result.status, result.body], [409, { error: 'RESTORE_MISMATCH' }]);
+    assert.equal(db.tables.notes.find(n => n.id === id).content, '변조');
+    assert.equal(db.tables.restore_audit, undefined);
+  }
+});
+
+test('10단계: DB가 실제로 저장한 행이 사본과 다르면 성공이라고 답하지 않는다', async () => {
+  const db = fakeSupabase({ pgUuid: true });
+  const notes = createNotesApi({ verify, store: createSupabaseStore(db) });
+  const { id } = (await call(notes.collection, { method: 'POST', token: 'user-b', body: { title: 'B', body: 'B 원본' } })).body;
+  await call(notes.item, { method: 'PUT', token: 'user-b', query: { id }, body: { title: 'x', body: '변조' } });
+  const store = createRestoreStore(db);
+  const real = store.updateNote;
+  store.updateNote = async (...args) => ({ ...(await real(...args)), body: 'B 원' }); // e.g. silent truncation
+  const logged = [];
+  const originalError = console.error;
+  console.error = (...args) => logged.push(args.join(' '));
+  try {
+    const result = await call(createNotesRestoreApi({ verify, store }).item, { method: 'POST', token: 'user-b', query: { id } });
+    assert.deepEqual([result.status, result.body], [502, { error: 'RESTORE_UNVERIFIED', audit: 'recorded' }]);
+    assert.deepEqual(logged, [`notes restore: persisted row does not match backup for note ${id}`]);
+  } finally {
+    console.error = originalError;
+  }
 });
 
 test('로그인 검증기는 형식이 틀린 토큰과 알 수 없는 발급자를 거부한다', async () => {

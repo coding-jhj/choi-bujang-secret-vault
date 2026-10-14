@@ -26,6 +26,21 @@ const isoOrNull = value => {
   return Number.isNaN(time) ? null : new Date(time).toISOString();
 };
 
+// UUIDs are compared case-insensitively: Postgres returns uuid columns in lowercase, while a
+// verified principal's userId (the judge's `sub` passes a case-insensitive regex) or the URL id
+// may arrive in another case. A plain `!==` would call the same uuid two different owners.
+const sameUuid = (left, right) => typeof left === 'string' && typeof right === 'string'
+  && UUID.test(left) && UUID.test(right) && left.toLowerCase() === right.toLowerCase();
+
+// The three values a restore must agree on: note id, owner, and sha256 of the content.
+// `expected` comes from the backup row; `actual` is either the request (before the write) or the
+// row the database returned from the write (after it). Only all three equal counts as a match.
+function sameRecord(expected, actual) {
+  return sameUuid(expected.id, actual.id) && sameUuid(expected.ownerId, actual.ownerId)
+    && typeof actual.contentSha256 === 'string'
+    && expected.contentSha256.toLowerCase() === actual.contentSha256.toLowerCase();
+}
+
 // POST /api/notes/:id/restore — restores ONE note of the verified user from notes_backup.
 // verify(authorization) -> { userId } | null.  store holds all database access.
 export function createNotesRestoreApi({ verify, store }) {
@@ -58,20 +73,34 @@ export function createNotesRestoreApi({ verify, store }) {
         // 2. The live note with this id, looked up WITHOUT the owner filter so a note owned by
         //    someone else is seen (and refused) instead of looking "missing" and being recreated.
         const liveOwner = await store.findNoteOwner(id);
-        if (liveOwner !== null && liveOwner !== user.userId) { send(response, 404, { error: 'NOT_FOUND' }); return; }
-        // 3. Content hash check before any write.
+        if (liveOwner !== null && !sameUuid(liveOwner, user.userId)) { send(response, 404, { error: 'NOT_FOUND' }); return; }
+        // 3. Content hash check before any write: the backup's own hash must equal sha256(content).
         if (!backupIntact(backup)) { send(response, 409, { error: 'BACKUP_HASH_MISMATCH' }); return; }
-        // 4. Write exactly this one id, still owner-scoped.
+        // 4. The three values must match the backup copy BEFORE the write, checked explicitly
+        //    rather than trusted to the lookup's filters: the backup's source_note_id is the
+        //    requested id, its owner_id is the verified user, and its hash is the content's hash.
+        const copy = { id: backup.sourceNoteId, ownerId: backup.ownerId, contentSha256: backup.contentSha256 };
+        if (!sameRecord(copy, { id, ownerId: user.userId, contentSha256: sha256(backup.content) })) {
+          send(response, 409, { error: 'RESTORE_MISMATCH' });
+          return;
+        }
+        // 5. Write exactly this one id, still owner-scoped.
         const input = { title: backup.title, body: backup.content };
-        const note = liveOwner === null
+        const row = liveOwner === null
           ? await store.insertNote(user.userId, id, input)
           : await store.updateNote(user.userId, id, input);
-        if (!note) { send(response, 404, { error: 'NOT_FOUND' }); return; }
-        // 5. Audit: add ONE restore_audit row (who, which note, from which backup row, when).
+        if (!row) { send(response, 404, { error: 'NOT_FOUND' }); return; }
+        // 6. Confirm what was ACTUALLY persisted: the row the database returned from the write
+        //    (id, owner_id, content) must again match the copy on all three values. The answer is
+        //    built from that persisted row, never from the backup values held in memory.
+        const persisted = { id: row.id, ownerId: row.ownerId, contentSha256: typeof row.body === 'string' ? sha256(row.body) : null };
+        const verified = sameRecord(copy, persisted);
+        // 7. Audit: add ONE restore_audit row (who, which note, from which backup row, when).
         //    It only inserts; it never updates or deletes anything. The note write above has
         //    already committed, so a failed audit insert does not turn the answer into an error,
         //    but it is never reported as recorded: the response says audit "failed" and one
-        //    server log line names the note id.
+        //    server log line names the note id. A write that happened is audited even if step 6
+        //    then refuses to call it a verified restore.
         let audit = 'recorded';
         try {
           await store.recordRestore(user.userId, id, backup.backupId);
@@ -79,13 +108,22 @@ export function createNotesRestoreApi({ verify, store }) {
           audit = 'failed';
           console.error(`restore_audit: insert failed for restored note ${id}`);
         }
-        send(response, 200, { ...note, restoredFrom: isoOrNull(backup.backedUpAt), audit });
+        if (!verified) {
+          console.error(`notes restore: persisted row does not match backup for note ${id}`);
+          send(response, 502, { error: 'RESTORE_UNVERIFIED', audit });
+          return;
+        }
+        send(response, 200, { id: row.id, title: row.title, body: row.body, ownerId: row.ownerId,
+          contentSha256: persisted.contentSha256, restoredFrom: isoOrNull(backup.backedUpAt), audit });
       });
     },
   };
 }
 
-const toNote = row => ({ id: row.id, title: row.title, body: row.content });
+// The written row as the database returned it, owner included, so the API can compare all three
+// restore values (id, owner, content hash) against the backup after the write.
+const toWritten = row => ({ id: row.id, ownerId: row.owner_id, title: row.title, body: row.content });
+const WRITTEN = 'id,owner_id,title,content';
 
 // Restore is a two-step write, not `insert ... on conflict (id) do update`:
 // an upsert's conflict branch would update the row by id alone, so a backup row pointing at
@@ -109,13 +147,13 @@ export function createSupabaseStore(client) {
       return row ? row.owner_id : null;
     },
     async insertNote(ownerId, id, { title, body }) {
-      return toNote(check(await client.from('notes').insert({ id, owner_id: ownerId, title, content: body })
-        .select('id,title,content').single()));
+      return toWritten(check(await client.from('notes').insert({ id, owner_id: ownerId, title, content: body })
+        .select(WRITTEN).single()));
     },
     async updateNote(ownerId, id, { title, body }) {
       const row = check(await client.from('notes').update({ title, content: body })
-        .eq('id', id).eq('owner_id', ownerId).select('id,title,content').maybeSingle());
-      return row ? toNote(row) : null;
+        .eq('id', id).eq('owner_id', ownerId).select(WRITTEN).maybeSingle());
+      return row ? toWritten(row) : null;
     },
     async recordRestore(ownerId, noteId, backupId) {
       check(await client.from('restore_audit')

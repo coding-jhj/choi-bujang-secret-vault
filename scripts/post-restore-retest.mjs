@@ -6,8 +6,10 @@
 //   2. Signs each one in to get a real access token, then drives the deployed /api/* routes with
 //      plain fetch(), exactly as a logged-in browser would: create, cross-account read/write,
 //      tamper, restore, cross-account restore. 9 numbered checks, one line each.
-//   3. ALWAYS cleans up (try/finally, also on Ctrl+C): deletes every notes / notes_backup /
-//      restore_audit row owned by the two throwaway users, then deletes both users.
+//   3. ALWAYS cleans up (try/finally, also on Ctrl+C): deletes every notes / notes_backup row
+//      owned by the two throwaway users, then deletes both users. It NEVER deletes restore_audit
+//      rows: audit history is append-only for everyone, this script included. The retest's own
+//      audit row (one, from check 7) stays, holding only uuids (note, throwaway owner, backup row).
 //   Exit code 0 only if all 9 checks passed AND cleanup fully succeeded; 1 otherwise.
 //
 // It uses the SERVICE-ROLE key (SUPABASE_SECRET_KEY). That key bypasses RLS and can create and
@@ -45,6 +47,8 @@ import { createClient } from '@supabase/supabase-js';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const FAKE_ID = '00000000-0000-4000-8000-000000000000';
 const DOMAIN = /^(?=.{3,120}$)[a-z0-9-]+(?:\.[a-z0-9-]+)+$/iu;
+// The only tables cleanup may delete from. restore_audit must never be added here.
+export const CLEANUP_TABLES = Object.freeze(['notes_backup', 'notes']);
 const CLIENT_OPTIONS = { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } };
 
 const short = value => {
@@ -123,7 +127,8 @@ export async function runRetest({ app, domain }, { admin, newAuthClient, fetchIm
       let ok = true;
       const owners = userIds.filter(id => UUID.test(id));
       if (owners.length) {
-        for (const table of ['restore_audit', 'notes_backup', 'notes']) {
+        // restore_audit is deliberately absent: audit rows are never deleted (see header).
+        for (const table of CLEANUP_TABLES) {
           try {
             const { error } = await admin.from(table).delete().in('owner_id', owners);
             if (error) throw new Error(error.message);
@@ -305,7 +310,7 @@ export async function runRetest({ app, domain }, { admin, newAuthClient, fetchIm
   } finally {
     cleanupOk = await cleanup();
     out(cleanupOk
-      ? `정리 · 시험 메모·백업·감사 행과 임시 계정 ${userIds.length}개를 모두 지웠습니다.`
+      ? `정리 · 시험 메모·백업 행과 임시 계정 ${userIds.length}개를 모두 지웠습니다. 감사 기록(restore_audit)은 지우지 않고 보존합니다.`
       : '정리 · 일부를 지우지 못했습니다. 위 "정리 실패" 줄을 확인해 주세요.');
   }
   const passed = results.filter(item => item.passed).length;

@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { createNotesApi, createSupabaseStore } from '../src/notes-api.mjs';
 import { createNotesRestoreApi, createSupabaseStore as createRestoreStore } from '../src/notes-restore-api.mjs';
 import { createLoginVerifier } from '../src/verify-login.mjs';
+import { CLEANUP_TABLES, runRetest } from '../scripts/post-restore-retest.mjs';
 
 const A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -375,6 +376,50 @@ test('10단계: 되돌리기까지 실패하면 다른 오류 코드로 알리�
     assert.deepEqual(logged, [`notes restore: persisted row does not match backup for note ${id}`,
       `notes restore: rollback FAILED for note ${id}, state uncertain`], name);
   }
+});
+
+// S10_AUDIT_DROPPED: the audit write must never be reported as recorded when it did not happen.
+test('10단계: 감사 행 쓰기가 실패하면 복구는 200이어도 audit "failed"로 정직하게 알린다', async () => {
+  const db = fakeSupabase({ pgUuid: true, failInsert: ['restore_audit'] });
+  const { id } = await tamperedNote(db);
+  const { result, logged } = await captureErrors(() =>
+    call(createNotesRestoreApi({ verify, store: createRestoreStore(db) }).item, { method: 'POST', token: 'user-b', query: { id } }));
+  assert.equal(result.status, 200);
+  assert.equal(result.body.audit, 'failed');
+  assert.deepEqual(db.tables.restore_audit, []);
+  assert.deepEqual(logged, [`restore_audit: insert failed for restored note ${id}`]);
+});
+
+// S10_AUDIT_DROPPED: the post-restore retest tool cleans up its throwaway rows but must never
+// delete audit history. Drives runRetest's real cleanup with a recording fake admin client.
+test('10단계: 복구 재시험 도구의 정리는 restore_audit를 절대 지우지 않는다', async () => {
+  const ops = [];
+  const owner = '12345678-1234-4234-8234-123456789abc';
+  const admin = {
+    auth: { admin: {
+      createUser: async () => ({ data: { user: { id: owner } }, error: null }),
+      deleteUser: async userId => { ops.push(['deleteUser', userId]); return { error: null }; },
+    } },
+    from(table) {
+      ops.push(['from', table]);
+      const q = {
+        delete() { ops.push(['delete', table]); return q; },
+        select() { return q; },
+        in: async () => ({ error: null, count: 0 }),
+      };
+      return q;
+    },
+  };
+  const { cleanupOk } = await runRetest({ app: new URL('https://example-app.vercel.app/'), domain: 'example.invalid' }, {
+    admin, out: () => {},
+    newAuthClient: () => ({ auth: { signInWithPassword: async () => ({ data: null, error: { message: 'no' } }) } }),
+    fetchImpl: async () => new Response(JSON.stringify({ error: 'LOGIN_REQUIRED' }), { status: 401 }),
+  });
+  assert.equal(cleanupOk, true);
+  assert.deepEqual(ops.filter(([, table]) => table === 'restore_audit'), []);
+  assert.deepEqual(ops.filter(([op]) => op === 'delete').map(([, table]) => table), ['notes_backup', 'notes']);
+  assert.deepEqual(ops.filter(([op]) => op === 'deleteUser'), [['deleteUser', owner]]);
+  assert.equal(CLEANUP_TABLES.includes('restore_audit'), false);
 });
 
 test('로그인 검증기는 형식이 틀린 토큰과 알 수 없는 발급자를 거부한다', async () => {

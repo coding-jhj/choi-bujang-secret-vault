@@ -57,7 +57,7 @@ test('attack check records closed results only when requests are rejected as JSO
     globalThis.fetch = closed;
     const results = await runAttackChecks(config);
     assert.deepEqual(results.map(item => item.attackId), ['no_login_list', 'no_login_create',
-      'forged_token_list', 'no_login_item_read', 'no_login_announcements_list',
+      'forged_token_list', 'no_login_item_read', 'no_login_restore', 'no_login_announcements_list',
       'no_login_announcements_create', 'no_login_announcement_write',
       'original_api_no_key_read', 'original_api_no_key_write',
       'public_files_no_key', 'login_bad_credentials', 'public_data_json_read',
@@ -73,7 +73,7 @@ test('attack check records closed results only when requests are rejected as JSO
     const open = await runAttackChecks(config);
     const byId = Object.fromEntries(open.map(item => [item.attackId, item.observed]));
     for (const id of ['no_login_list', 'no_login_create', 'forged_token_list', 'no_login_item_read',
-      'no_login_announcements_list', 'no_login_announcements_create', 'no_login_announcement_write',
+      'no_login_restore', 'no_login_announcements_list', 'no_login_announcements_create', 'no_login_announcement_write',
       'original_api_no_key_read', 'original_api_no_key_write', 'login_bad_credentials',
       'public_data_json_read', 'nosniff_header']) {
       assert.ok(!/^(거부됨|열리지 않음|헤더 있음)/u.test(byId[id]), id);

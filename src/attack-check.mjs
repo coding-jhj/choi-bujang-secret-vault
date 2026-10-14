@@ -74,6 +74,12 @@ export async function runAttackChecks(config) {
       () => probe(url('/api/notes'), { headers: { Authorization: forged } })],
     ['no_login_item_read', '로그인 없이 메모 한 건 조회가 401/403과 JSON으로 거부됨',
       () => probe(url(`/api/notes/${FAKE_ID}`))],
+    // Step 10: the restore route must stay login-gated after the auto-backup/audit change.
+    // This is only the unauthenticated slice of the post-restore retest. The full retest
+    // (after a restore, B is denied and A is allowed) needs two real accounts and stays a
+    // manual step, the same limit as steps 4/8/9.
+    ['no_login_restore', '로그인 없이 메모 복구 요청이 401/403과 JSON으로 거부됨',
+      () => probe(url(`/api/notes/${FAKE_ID}/restore`), { method: 'POST', headers: json, body: '{}' })],
     ['no_login_announcements_list', '로그인 없이 공지 목록 요청이 401/403과 JSON으로 거부됨',
       () => probe(url('/api/announcements'))],
     ['no_login_announcements_create', '로그인 없이 공지 추가가 401/403과 JSON으로 거부됨',

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { createLoginVerifier } from './verify-login.mjs';
 
@@ -82,16 +83,44 @@ export function createNotesApi({ verify, store }) {
 
 const toNote = row => ({ id: row.id, title: row.title, body: row.content });
 
+// Same hash as src/notes-restore-api.mjs (sha256 hex of the UTF-8 content), which re-checks it
+// before any restore. Duplicated on purpose: each API file stays self-contained.
+const sha256 = text => createHash('sha256').update(text, 'utf8').digest('hex');
+
+// Step 10 backup snapshot — taken ONLY when a note is created (POST), never on update (PUT).
+// The restore card asks for "a copy verified BEFORE the breach" (침해 전에 검증한 자료). If every
+// PUT refreshed the backup, a tampering PUT would overwrite the recovery point with the tampered
+// text and restore would faithfully bring the tampered text back. So the creation-time state is
+// the recovery point, and PUT/DELETE never touch notes_backup.
+// The snapshot is built from the row the database returned (id, owner_id, title, content as
+// actually stored), not from the request, so the hash describes what is really in `notes`.
+// Failure posture: the note insert already committed and the client needs its id, so a failed
+// snapshot does NOT turn the save into an error. It is not swallowed silently either: one
+// server log line with the note id (no content, no owner, no key) goes to the Vercel function
+// log. Such a note has no recovery point and its restore answers 404 until a backfill
+// (see supabase/schema-notes-backup.sql) is run for it.
 export function createSupabaseStore(client) {
   const check = ({ data, error }) => { if (error) throw new Error('db'); return data; };
+  async function snapshot(row) {
+    try {
+      check(await client.from('notes_backup').insert({
+        source_note_id: row.id, owner_id: row.owner_id, title: row.title,
+        content: row.content, content_sha256: sha256(row.content),
+      }));
+    } catch {
+      console.error(`notes_backup: creation snapshot failed for note ${row.id}`);
+    }
+  }
   return {
     async list(ownerId) {
       return check(await client.from('notes').select('id,title,content')
         .eq('owner_id', ownerId).order('created_at', { ascending: true })).map(toNote);
     },
     async create(ownerId, { title, body }) {
-      return check(await client.from('notes').insert({ owner_id: ownerId, title, content: body })
-        .select('id').single()).id;
+      const row = check(await client.from('notes').insert({ owner_id: ownerId, title, content: body })
+        .select('id,owner_id,title,content').single());
+      await snapshot(row);
+      return row.id;
     },
     async get(ownerId, id) {
       const row = check(await client.from('notes').select('id,title,content')

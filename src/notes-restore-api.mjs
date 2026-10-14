@@ -67,7 +67,19 @@ export function createNotesRestoreApi({ verify, store }) {
           ? await store.insertNote(user.userId, id, input)
           : await store.updateNote(user.userId, id, input);
         if (!note) { send(response, 404, { error: 'NOT_FOUND' }); return; }
-        send(response, 200, { ...note, restoredFrom: isoOrNull(backup.backedUpAt) });
+        // 5. Audit: add ONE restore_audit row (who, which note, from which backup row, when).
+        //    It only inserts; it never updates or deletes anything. The note write above has
+        //    already committed, so a failed audit insert does not turn the answer into an error,
+        //    but it is never reported as recorded: the response says audit "failed" and one
+        //    server log line names the note id.
+        let audit = 'recorded';
+        try {
+          await store.recordRestore(user.userId, id, backup.backupId);
+        } catch {
+          audit = 'failed';
+          console.error(`restore_audit: insert failed for restored note ${id}`);
+        }
+        send(response, 200, { ...note, restoredFrom: isoOrNull(backup.backedUpAt), audit });
       });
     },
   };
@@ -84,11 +96,11 @@ export function createSupabaseStore(client) {
   return {
     async findBackup(ownerId, noteId) {
       const row = check(await client.from('notes_backup')
-        .select('source_note_id,owner_id,title,content,content_sha256,backed_up_at')
+        .select('id,source_note_id,owner_id,title,content,content_sha256,backed_up_at')
         .eq('source_note_id', noteId).eq('owner_id', ownerId)
         .order('backed_up_at', { ascending: false }).limit(1).maybeSingle());
       return row ? {
-        sourceNoteId: row.source_note_id, ownerId: row.owner_id, title: row.title,
+        backupId: row.id, sourceNoteId: row.source_note_id, ownerId: row.owner_id, title: row.title,
         content: row.content, contentSha256: row.content_sha256, backedUpAt: row.backed_up_at,
       } : null;
     },
@@ -104,6 +116,10 @@ export function createSupabaseStore(client) {
       const row = check(await client.from('notes').update({ title, content: body })
         .eq('id', id).eq('owner_id', ownerId).select('id,title,content').maybeSingle());
       return row ? toNote(row) : null;
+    },
+    async recordRestore(ownerId, noteId, backupId) {
+      check(await client.from('restore_audit')
+        .insert({ note_id: noteId, owner_id: ownerId, restored_backup_id: backupId }));
     },
   };
 }

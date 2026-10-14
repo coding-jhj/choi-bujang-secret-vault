@@ -56,35 +56,52 @@ export function createNotesRestoreApi({ verify, store }) {
     return user;
   }
 
-  const run = async (response, work) => {
-    try { await work(); } catch { send(response, 502, { error: 'NOTES_UNAVAILABLE' }); }
-  };
-
   return {
     async item(request, response) {
       const user = await guard(request, response, ['POST']);
       if (!user) return;
+      // Verification evidence, attached to EVERY answer from here on (success and failure), so the
+      // response alone shows what was compared and what happened. Values are filled in as each
+      // step runs; null = that step was never reached (not "passed", not "failed").
+      //   backupId        notes_backup row used (null: no backup of this user for this note)
+      //   backupSha256    the hash stored on that backup row
+      //   idMatch/ownerMatch/hashMatch  the pre-write 3-value check: backup's source_note_id = the
+      //                   requested id, backup's owner_id = the verified user, stored hash =
+      //                   sha256(backup content)
+      //   persistedSha256 sha256 of the note content left in the database after this request
+      //                   (null: nothing written, the written row was removed, or state unknown)
+      //   rolledBack      true only when an unverified write was undone
+      //   audit           'recorded' | 'failed' after a verified restore, else 'not_written'
+      const verification = { backupId: null, backupSha256: null, idMatch: null, ownerMatch: null,
+        hashMatch: null, persistedSha256: null, rolledBack: false, audit: 'not_written' };
+      const reply = (status, body) => send(response, status, { ...body, verification });
       const id = request.query?.id;
-      if (typeof id !== 'string' || !UUID.test(id)) { send(response, 404, { error: 'NOT_FOUND' }); return; }
-      await run(response, async () => {
+      if (typeof id !== 'string' || !UUID.test(id)) { reply(404, { error: 'NOT_FOUND' }); return; }
+      try {
         // 1. Owner-scoped from the start: only a backup row whose owner_id is the verified user.
         const backup = await store.findBackup(user.userId, id);
-        if (!backup) { send(response, 404, { error: 'NOT_FOUND' }); return; }
+        if (!backup) { reply(404, { error: 'NOT_FOUND' }); return; }
+        verification.backupId = backup.backupId ?? null;
+        verification.backupSha256 = typeof backup.contentSha256 === 'string' ? backup.contentSha256.toLowerCase() : null;
+        verification.idMatch = sameUuid(backup.sourceNoteId, id);
+        verification.ownerMatch = sameUuid(backup.ownerId, user.userId);
+        verification.hashMatch = verification.backupSha256 !== null && typeof backup.content === 'string'
+          && verification.backupSha256 === sha256(backup.content);
         // 2. The live note with this id, looked up WITHOUT the owner filter so a note owned by
         //    someone else is seen (and refused) instead of looking "missing" and being recreated.
         //    The same single read also captures the row's current title/content: the pre-restore
         //    state that step 6 rolls back to if the write cannot be verified.
         const live = await store.findLiveNote(id);
         const liveOwner = live === null ? null : live.ownerId;
-        if (liveOwner !== null && !sameUuid(liveOwner, user.userId)) { send(response, 404, { error: 'NOT_FOUND' }); return; }
+        if (liveOwner !== null && !sameUuid(liveOwner, user.userId)) { reply(404, { error: 'NOT_FOUND' }); return; }
         // 3. Content hash check before any write: the backup's own hash must equal sha256(content).
-        if (!backupIntact(backup)) { send(response, 409, { error: 'BACKUP_HASH_MISMATCH' }); return; }
+        if (!backupIntact(backup)) { reply(409, { error: 'BACKUP_HASH_MISMATCH' }); return; }
         // 4. The three values must match the backup copy BEFORE the write, checked explicitly
         //    rather than trusted to the lookup's filters: the backup's source_note_id is the
         //    requested id, its owner_id is the verified user, and its hash is the content's hash.
         const copy = { id: backup.sourceNoteId, ownerId: backup.ownerId, contentSha256: backup.contentSha256 };
         if (!sameRecord(copy, { id, ownerId: user.userId, contentSha256: sha256(backup.content) })) {
-          send(response, 409, { error: 'RESTORE_MISMATCH' });
+          reply(409, { error: 'RESTORE_MISMATCH' });
           return;
         }
         // 5. Write exactly this one id, still owner-scoped.
@@ -92,7 +109,7 @@ export function createNotesRestoreApi({ verify, store }) {
         const row = liveOwner === null
           ? await store.insertNote(user.userId, id, input)
           : await store.updateNote(user.userId, id, input);
-        if (!row) { send(response, 404, { error: 'NOT_FOUND' }); return; }
+        if (!row) { reply(404, { error: 'NOT_FOUND' }); return; }
         // 6. Confirm what was ACTUALLY persisted: the row the database returned from the write
         //    (id, owner_id, content) must again match the copy on all three values. The answer is
         //    built from that persisted row, never from the backup values held in memory.
@@ -122,13 +139,19 @@ export function createNotesRestoreApi({ verify, store }) {
             rolledBack = false;
           }
           if (!rolledBack) {
+            // State uncertain: no hash is claimed for what the database now holds.
             console.error(`notes restore: rollback FAILED for note ${id}, state uncertain`);
-            send(response, 502, { error: 'RESTORE_UNVERIFIED_ROLLBACK_FAILED' });
+            reply(502, { error: 'RESTORE_UNVERIFIED_ROLLBACK_FAILED' });
             return;
           }
-          send(response, 502, { error: 'RESTORE_UNVERIFIED_ROLLED_BACK' });
+          verification.rolledBack = true;
+          // After a verified rollback the note holds its pre-restore content again (update path),
+          // or no longer exists (insert path).
+          verification.persistedSha256 = live === null || typeof live.body !== 'string' ? null : sha256(live.body);
+          reply(502, { error: 'RESTORE_UNVERIFIED_ROLLED_BACK' });
           return;
         }
+        verification.persistedSha256 = persisted.contentSha256;
         // 7. Audit: add ONE restore_audit row (who, which note, from which backup row, when).
         //    Reached only by a verified restore. It only inserts; it never updates or deletes
         //    anything. The note write above has already committed, so a failed audit insert does
@@ -141,9 +164,14 @@ export function createNotesRestoreApi({ verify, store }) {
           audit = 'failed';
           console.error(`restore_audit: insert failed for restored note ${id}`);
         }
-        send(response, 200, { id: row.id, title: row.title, body: row.body, ownerId: row.ownerId,
+        verification.audit = audit;
+        reply(200, { id: row.id, title: row.title, body: row.body, ownerId: row.ownerId,
           contentSha256: persisted.contentSha256, restoredFrom: isoOrNull(backup.backedUpAt), audit });
-      });
+      } catch {
+        // A store error after a write may leave the note's state unknown: claim no persisted hash.
+        verification.persistedSha256 = null;
+        reply(502, { error: 'NOTES_UNAVAILABLE' });
+      }
     },
   };
 }

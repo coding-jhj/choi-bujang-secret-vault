@@ -184,6 +184,16 @@ function fakeSupabase({ failInsert = [], pgUuid = false } = {}) {
 
 const hex = text => createHash('sha256').update(text, 'utf8').digest('hex');
 
+// Restore answers carry a `verification` object (보완 8). Split it off so the error/status part
+// is still compared exactly, and the evidence is asserted separately.
+const VERIFICATION_KEYS = ['audit', 'backupId', 'backupSha256', 'hashMatch', 'idMatch', 'ownerMatch',
+  'persistedSha256', 'rolledBack'];
+function splitVerification(result) {
+  const { verification, ...rest } = result.body;
+  assert.deepEqual(Object.keys(verification ?? {}).sort(), VERIFICATION_KEYS);
+  return [result.status, rest, verification];
+}
+
 test('10단계: POST만 저장된 값으로 사본을 만들고, PUT·DELETE는 사본을 건드리지 않는다', async () => {
   const db = fakeSupabase();
   const api = createNotesApi({ verify, store: createSupabaseStore(db) });
@@ -265,6 +275,41 @@ test('10단계: 응답은 저장된 행의 id·소유자·내용 해시를 돌�
     { id: copy.source_note_id, ownerId: copy.owner_id, contentSha256: copy.content_sha256 });
   assert.deepEqual({ id: live.id, owner: live.owner_id, hash: hex(live.content) },
     { id: copy.source_note_id, owner: copy.owner_id, hash: copy.content_sha256 });
+  // 보완 8: the success answer carries its own verification evidence, and it matches the database.
+  const [, , verification] = splitVerification(restored);
+  assert.deepEqual(verification, { backupId: copy.id, backupSha256: copy.content_sha256,
+    idMatch: true, ownerMatch: true, hashMatch: true, persistedSha256: hex(live.content),
+    rolledBack: false, audit: 'recorded' });
+  assert.equal(restored.body.audit, verification.audit);
+});
+
+test('10단계 보완 8: 해시가 변조된 사본은 409이고, 응답의 verification이 해시 불일치와 무쓰기를 보여 준다', async () => {
+  const db = fakeSupabase({ pgUuid: true });
+  const { id } = await tamperedNote(db);
+  const [copy] = db.tables.notes_backup;
+  copy.content = '사본 내용을 몰래 바꿈';
+  const result = await call(createNotesRestoreApi({ verify, store: createRestoreStore(db) }).item,
+    { method: 'POST', token: 'user-b', query: { id } });
+  const [status, rest, verification] = splitVerification(result);
+  assert.deepEqual([status, rest], [409, { error: 'BACKUP_HASH_MISMATCH' }]);
+  assert.deepEqual(verification, { backupId: copy.id, backupSha256: copy.content_sha256,
+    idMatch: true, ownerMatch: true, hashMatch: false, persistedSha256: null,
+    rolledBack: false, audit: 'not_written' });
+  assert.equal(db.tables.notes.find(n => n.id === id).content, '변조');
+  assert.equal(db.tables.restore_audit, undefined);
+});
+
+test('10단계 보완 8: 남의 메모 복구는 404이고, verification은 사본도 대조도 드러내지 않는다', async () => {
+  const db = fakeSupabase({ pgUuid: true });
+  const { id } = await tamperedNote(db);
+  const result = await call(createNotesRestoreApi({ verify, store: createRestoreStore(db) }).item,
+    { method: 'POST', token: 'user-a', query: { id } });
+  const [status, rest, verification] = splitVerification(result);
+  assert.deepEqual([status, rest], [404, { error: 'NOT_FOUND' }]);
+  assert.deepEqual(verification, { backupId: null, backupSha256: null, idMatch: null, ownerMatch: null,
+    hashMatch: null, persistedSha256: null, rolledBack: false, audit: 'not_written' });
+  assert.equal(db.tables.notes.find(n => n.id === id).content, '변조');
+  assert.equal(db.tables.restore_audit, undefined);
 });
 
 test('10단계: 대소문자가 다른 같은 uuid의 주체(심판 sub)도 자기 메모를 복구한다', async () => {
@@ -292,7 +337,11 @@ test('10단계: 사본의 id·소유자가 요청과 다르면 쓰기 전에 409
     const real = store.findBackup;
     store.findBackup = async (...args) => ({ ...(await real(...args)), ...lie });
     const result = await call(createNotesRestoreApi({ verify, store }).item, { method: 'POST', token: 'user-b', query: { id } });
-    assert.deepEqual([result.status, result.body], [409, { error: 'RESTORE_MISMATCH' }]);
+    const [status, rest, verification] = splitVerification(result);
+    assert.deepEqual([status, rest], [409, { error: 'RESTORE_MISMATCH' }]);
+    assert.deepEqual([verification.idMatch, verification.ownerMatch, verification.hashMatch],
+      lie.ownerId ? [true, false, true] : [false, true, true]);
+    assert.deepEqual([verification.persistedSha256, verification.rolledBack, verification.audit], [null, false, 'not_written']);
     assert.equal(db.tables.notes.find(n => n.id === id).content, '변조');
     assert.equal(db.tables.restore_audit, undefined);
   }
@@ -334,8 +383,13 @@ test('10단계: 쓴 뒤 검증이 실패하면 복구 전 상태로 되돌리고
   truncatingFirstWrite(store, 'updateNote');
   const { result, logged } = await captureErrors(() =>
     call(createNotesRestoreApi({ verify, store }).item, { method: 'POST', token: 'user-b', query: { id } }));
-  assert.deepEqual([result.status, result.body], [502, { error: 'RESTORE_UNVERIFIED_ROLLED_BACK' }]);
+  const [status, rest, verification] = splitVerification(result);
+  assert.deepEqual([status, rest], [502, { error: 'RESTORE_UNVERIFIED_ROLLED_BACK' }]);
   assert.deepEqual(db.tables.notes.find(n => n.id === id), before);
+  const [copy] = db.tables.notes_backup;
+  assert.deepEqual(verification, { backupId: copy.id, backupSha256: copy.content_sha256,
+    idMatch: true, ownerMatch: true, hashMatch: true, persistedSha256: hex(before.content),
+    rolledBack: true, audit: 'not_written' });
   assert.equal(db.tables.restore_audit, undefined);
   assert.deepEqual(logged, [`notes restore: persisted row does not match backup for note ${id}`]);
 });
@@ -348,7 +402,9 @@ test('10단계: 지워진 메모를 되살리다 검증이 실패하면 방금 �
   truncatingFirstWrite(store, 'insertNote');
   const { result } = await captureErrors(() =>
     call(createNotesRestoreApi({ verify, store }).item, { method: 'POST', token: 'user-b', query: { id } }));
-  assert.deepEqual([result.status, result.body], [502, { error: 'RESTORE_UNVERIFIED_ROLLED_BACK' }]);
+  const [status, rest, verification] = splitVerification(result);
+  assert.deepEqual([status, rest], [502, { error: 'RESTORE_UNVERIFIED_ROLLED_BACK' }]);
+  assert.deepEqual([verification.rolledBack, verification.persistedSha256, verification.audit], [true, null, 'not_written']);
   assert.equal(db.tables.notes.some(n => n.id === id), false);
   assert.equal(db.tables.restore_audit, undefined);
 });
@@ -371,7 +427,10 @@ test('10단계: 되돌리기까지 실패하면 다른 오류 코드로 알리�
     else truncatingFirstWrite(store, 'updateNote', update);
     const { result, logged } = await captureErrors(() =>
       call(createNotesRestoreApi({ verify, store }).item, { method: 'POST', token: 'user-b', query: { id } }));
-    assert.deepEqual([result.status, result.body], [502, { error: 'RESTORE_UNVERIFIED_ROLLBACK_FAILED' }], name);
+    const [status, rest, verification] = splitVerification(result);
+    assert.deepEqual([status, rest], [502, { error: 'RESTORE_UNVERIFIED_ROLLBACK_FAILED' }], name);
+    assert.deepEqual([verification.rolledBack, verification.persistedSha256, verification.audit],
+      [false, null, 'not_written'], name);
     assert.equal(db.tables.restore_audit, undefined, name);
     assert.deepEqual(logged, [`notes restore: persisted row does not match backup for note ${id}`,
       `notes restore: rollback FAILED for note ${id}, state uncertain`], name);
@@ -386,6 +445,7 @@ test('10단계: 감사 행 쓰기가 실패하면 복구는 200이어도 audit "
     call(createNotesRestoreApi({ verify, store: createRestoreStore(db) }).item, { method: 'POST', token: 'user-b', query: { id } }));
   assert.equal(result.status, 200);
   assert.equal(result.body.audit, 'failed');
+  assert.equal(result.body.verification.audit, 'failed');
   assert.deepEqual(db.tables.restore_audit, []);
   assert.deepEqual(logged, [`restore_audit: insert failed for restored note ${id}`]);
 });

@@ -297,23 +297,83 @@ test('10단계: 사본의 id·소유자가 요청과 다르면 쓰기 전에 409
   }
 });
 
-test('10단계: DB가 실제로 저장한 행이 사본과 다르면 성공이라고 답하지 않는다', async () => {
-  const db = fakeSupabase({ pgUuid: true });
-  const notes = createNotesApi({ verify, store: createSupabaseStore(db) });
-  const { id } = (await call(notes.collection, { method: 'POST', token: 'user-b', body: { title: 'B', body: 'B 원본' } })).body;
-  await call(notes.item, { method: 'PUT', token: 'user-b', query: { id }, body: { title: 'x', body: '변조' } });
-  const store = createRestoreStore(db);
-  const real = store.updateNote;
-  store.updateNote = async (...args) => ({ ...(await real(...args)), body: 'B 원' }); // e.g. silent truncation
+// S10_BACKUP_UNVERIFIED regression: a write that fails post-write verification is rolled back.
+// The first restore write really persists wrong content (silent truncation); later writes are real.
+// `later(real)` optionally replaces every call after the first (used to break the rollback).
+function truncatingFirstWrite(store, method, later = real => real) {
+  const real = store[method];
+  const next = later(real);
+  let first = true;
+  store[method] = async (ownerId, id, input) => {
+    if (!first) return next(ownerId, id, input);
+    first = false;
+    return real(ownerId, id, { ...input, body: input.body.slice(0, 3) });
+  };
+}
+
+async function captureErrors(fn) {
   const logged = [];
   const originalError = console.error;
   console.error = (...args) => logged.push(args.join(' '));
-  try {
-    const result = await call(createNotesRestoreApi({ verify, store }).item, { method: 'POST', token: 'user-b', query: { id } });
-    assert.deepEqual([result.status, result.body], [502, { error: 'RESTORE_UNVERIFIED', audit: 'recorded' }]);
-    assert.deepEqual(logged, [`notes restore: persisted row does not match backup for note ${id}`]);
-  } finally {
-    console.error = originalError;
+  try { return { result: await fn(), logged }; } finally { console.error = originalError; }
+}
+
+async function tamperedNote(db) {
+  const notes = createNotesApi({ verify, store: createSupabaseStore(db) });
+  const { id } = (await call(notes.collection, { method: 'POST', token: 'user-b', body: { title: 'B', body: 'B 원본 내용' } })).body;
+  await call(notes.item, { method: 'PUT', token: 'user-b', query: { id }, body: { title: 'x', body: '변조' } });
+  return { id, notes };
+}
+
+test('10단계: 쓴 뒤 검증이 실패하면 복구 전 상태로 되돌리고 감사 기록을 남기지 않는다 (수정 경로)', async () => {
+  const db = fakeSupabase({ pgUuid: true });
+  const { id } = await tamperedNote(db);
+  const before = structuredClone(db.tables.notes.find(n => n.id === id));
+  const store = createRestoreStore(db);
+  truncatingFirstWrite(store, 'updateNote');
+  const { result, logged } = await captureErrors(() =>
+    call(createNotesRestoreApi({ verify, store }).item, { method: 'POST', token: 'user-b', query: { id } }));
+  assert.deepEqual([result.status, result.body], [502, { error: 'RESTORE_UNVERIFIED_ROLLED_BACK' }]);
+  assert.deepEqual(db.tables.notes.find(n => n.id === id), before);
+  assert.equal(db.tables.restore_audit, undefined);
+  assert.deepEqual(logged, [`notes restore: persisted row does not match backup for note ${id}`]);
+});
+
+test('10단계: 지워진 메모를 되살리다 검증이 실패하면 방금 넣은 행을 지운다 (삽입 경로)', async () => {
+  const db = fakeSupabase({ pgUuid: true });
+  const { id, notes } = await tamperedNote(db);
+  await call(notes.item, { method: 'DELETE', token: 'user-b', query: { id } });
+  const store = createRestoreStore(db);
+  truncatingFirstWrite(store, 'insertNote');
+  const { result } = await captureErrors(() =>
+    call(createNotesRestoreApi({ verify, store }).item, { method: 'POST', token: 'user-b', query: { id } }));
+  assert.deepEqual([result.status, result.body], [502, { error: 'RESTORE_UNVERIFIED_ROLLED_BACK' }]);
+  assert.equal(db.tables.notes.some(n => n.id === id), false);
+  assert.equal(db.tables.restore_audit, undefined);
+});
+
+test('10단계: 되돌리기까지 실패하면 다른 오류 코드로 알리고 성공이라 하지 않는다', async () => {
+  // update path: the rollback is the 2nd updateNote call; insert path: the rollback is deleteNote.
+  const breakers = {
+    'update throws': { update: () => async () => { throw new Error('db'); } },
+    'update returns other content': { update: real => async (o, i, x) => ({ ...(await real(o, i, x)), body: 'other' }) },
+    'update returns null': { update: () => async () => null },
+    'delete throws': { remove: async () => { throw new Error('db'); } },
+    'delete removes nothing': { remove: async () => false },
+  };
+  for (const [name, { update, remove }] of Object.entries(breakers)) {
+    const db = fakeSupabase({ pgUuid: true });
+    const { id, notes } = await tamperedNote(db);
+    if (remove) await call(notes.item, { method: 'DELETE', token: 'user-b', query: { id } });
+    const store = createRestoreStore(db);
+    if (remove) { truncatingFirstWrite(store, 'insertNote'); store.deleteNote = remove; }
+    else truncatingFirstWrite(store, 'updateNote', update);
+    const { result, logged } = await captureErrors(() =>
+      call(createNotesRestoreApi({ verify, store }).item, { method: 'POST', token: 'user-b', query: { id } }));
+    assert.deepEqual([result.status, result.body], [502, { error: 'RESTORE_UNVERIFIED_ROLLBACK_FAILED' }], name);
+    assert.equal(db.tables.restore_audit, undefined, name);
+    assert.deepEqual(logged, [`notes restore: persisted row does not match backup for note ${id}`,
+      `notes restore: rollback FAILED for note ${id}, state uncertain`], name);
   }
 });
 

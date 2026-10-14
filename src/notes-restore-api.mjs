@@ -72,7 +72,10 @@ export function createNotesRestoreApi({ verify, store }) {
         if (!backup) { send(response, 404, { error: 'NOT_FOUND' }); return; }
         // 2. The live note with this id, looked up WITHOUT the owner filter so a note owned by
         //    someone else is seen (and refused) instead of looking "missing" and being recreated.
-        const liveOwner = await store.findNoteOwner(id);
+        //    The same single read also captures the row's current title/content: the pre-restore
+        //    state that step 6 rolls back to if the write cannot be verified.
+        const live = await store.findLiveNote(id);
+        const liveOwner = live === null ? null : live.ownerId;
         if (liveOwner !== null && !sameUuid(liveOwner, user.userId)) { send(response, 404, { error: 'NOT_FOUND' }); return; }
         // 3. Content hash check before any write: the backup's own hash must equal sha256(content).
         if (!backupIntact(backup)) { send(response, 409, { error: 'BACKUP_HASH_MISMATCH' }); return; }
@@ -94,24 +97,49 @@ export function createNotesRestoreApi({ verify, store }) {
         //    (id, owner_id, content) must again match the copy on all three values. The answer is
         //    built from that persisted row, never from the backup values held in memory.
         const persisted = { id: row.id, ownerId: row.ownerId, contentSha256: typeof row.body === 'string' ? sha256(row.body) : null };
-        const verified = sameRecord(copy, persisted);
+        // 6b. Verification failed after the write: undo it instead of leaving the note in a state
+        //    nobody verified. Against real Postgres this path is expected to be near-impossible:
+        //    the row compared above is the one the same UPDATE/INSERT returned (RETURNING), so it
+        //    carries back the very values just written. It is handled anyway because (a) a restore
+        //    must never leave unverified data behind, however unlikely the trigger (a column
+        //    trigger, a silent truncation, a store bug), and (b) step 10 requires that nothing stays
+        //    restored after a verification failure. Rollback = write the pre-restore title/content
+        //    back (the note existed) or delete the just-inserted row (it did not). The rollback is
+        //    itself checked; if it fails too, the note's state is uncertain and the answer says so.
+        //    No restore_audit row is added in either case: nothing was restored.
+        if (!sameRecord(copy, persisted)) {
+          console.error(`notes restore: persisted row does not match backup for note ${id}`);
+          let rolledBack = false;
+          try {
+            if (live === null) {
+              rolledBack = (await store.deleteNote(user.userId, id)) === true;
+            } else {
+              const back = await store.updateNote(user.userId, id, { title: live.title, body: live.body });
+              rolledBack = !!back && sameUuid(back.id, id) && sameUuid(back.ownerId, user.userId)
+                && back.title === live.title && back.body === live.body;
+            }
+          } catch {
+            rolledBack = false;
+          }
+          if (!rolledBack) {
+            console.error(`notes restore: rollback FAILED for note ${id}, state uncertain`);
+            send(response, 502, { error: 'RESTORE_UNVERIFIED_ROLLBACK_FAILED' });
+            return;
+          }
+          send(response, 502, { error: 'RESTORE_UNVERIFIED_ROLLED_BACK' });
+          return;
+        }
         // 7. Audit: add ONE restore_audit row (who, which note, from which backup row, when).
-        //    It only inserts; it never updates or deletes anything. The note write above has
-        //    already committed, so a failed audit insert does not turn the answer into an error,
-        //    but it is never reported as recorded: the response says audit "failed" and one
-        //    server log line names the note id. A write that happened is audited even if step 6
-        //    then refuses to call it a verified restore.
+        //    Reached only by a verified restore. It only inserts; it never updates or deletes
+        //    anything. The note write above has already committed, so a failed audit insert does
+        //    not turn the answer into an error, but it is never reported as recorded: the
+        //    response says audit "failed" and one server log line names the note id.
         let audit = 'recorded';
         try {
           await store.recordRestore(user.userId, id, backup.backupId);
         } catch {
           audit = 'failed';
           console.error(`restore_audit: insert failed for restored note ${id}`);
-        }
-        if (!verified) {
-          console.error(`notes restore: persisted row does not match backup for note ${id}`);
-          send(response, 502, { error: 'RESTORE_UNVERIFIED', audit });
-          return;
         }
         send(response, 200, { id: row.id, title: row.title, body: row.body, ownerId: row.ownerId,
           contentSha256: persisted.contentSha256, restoredFrom: isoOrNull(backup.backedUpAt), audit });
@@ -142,9 +170,10 @@ export function createSupabaseStore(client) {
         content: row.content, contentSha256: row.content_sha256, backedUpAt: row.backed_up_at,
       } : null;
     },
-    async findNoteOwner(id) {
-      const row = check(await client.from('notes').select('owner_id').eq('id', id).maybeSingle());
-      return row ? row.owner_id : null;
+    // The live note by id alone (owner, title, content), or null when it does not exist.
+    async findLiveNote(id) {
+      const row = check(await client.from('notes').select('owner_id,title,content').eq('id', id).maybeSingle());
+      return row ? { ownerId: row.owner_id, title: row.title, body: row.content } : null;
     },
     async insertNote(ownerId, id, { title, body }) {
       return toWritten(check(await client.from('notes').insert({ id, owner_id: ownerId, title, content: body })
@@ -154,6 +183,11 @@ export function createSupabaseStore(client) {
       const row = check(await client.from('notes').update({ title, content: body })
         .eq('id', id).eq('owner_id', ownerId).select(WRITTEN).maybeSingle());
       return row ? toWritten(row) : null;
+    },
+    // Rollback of an unverified insert: deletes this one id, still owner-scoped. true = a row went.
+    async deleteNote(ownerId, id) {
+      return check(await client.from('notes').delete()
+        .eq('id', id).eq('owner_id', ownerId).select('id')).length > 0;
     },
     async recordRestore(ownerId, noteId, backupId) {
       check(await client.from('restore_audit')

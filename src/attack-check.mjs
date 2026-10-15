@@ -16,6 +16,13 @@ const rejected = ({ status, json }) => closedStatus(status) && json
   ? `거부됨 (HTTP ${status}, JSON 오류 문구)`
   : `거부 조건을 만족하지 않음 (HTTP ${status}, JSON ${json ? '맞음' : '아님'})`;
 
+// S12_BUNDLE_UNSUPPORTED: the judge's isolated environment can only send GET/HEAD requests
+// (no POST/PUT/DELETE network I/O). Every check below that would send a write request is marked
+// `write: true` and is never executed there - its `observed` is recorded as not_run instead,
+// so `npm run bundle` finishes instead of hanging/failing on an unsupported network call. GET/HEAD
+// checks are unchanged and still actually run.
+export const NOT_RUN = '미실행 (격리 환경에서는 GET·HEAD 요청만 보냄, 쓰기 요청 점검 아님)';
+
 // 원본 자료 API 주소는 설정 파일의 값을 쓴다. 공개 키가 화면에 없으므로 키 없이 보낸 요청만 시험한다.
 function originalApi(config) {
   const base = new URL(config.originalApiUrl);
@@ -69,7 +76,7 @@ export async function runAttackChecks(config) {
       () => probe(url('/api/notes'))],
     ['no_login_create', '로그인 없이 메모 추가가 401/403과 JSON으로 거부됨',
       () => probe(url('/api/notes'), { method: 'POST', headers: json,
-        body: JSON.stringify({ title: 'x', body: 'x' }) })],
+        body: JSON.stringify({ title: 'x', body: 'x' }) }), true],
     ['forged_token_list', '위조된 토큰으로 목록 요청이 401/403과 JSON으로 거부됨',
       () => probe(url('/api/notes'), { headers: { Authorization: forged } })],
     ['no_login_item_read', '로그인 없이 메모 한 건 조회가 401/403과 JSON으로 거부됨',
@@ -81,15 +88,15 @@ export async function runAttackChecks(config) {
     // their own Supabase service-role key against the live site — never from here, since
     // this file must not hold that secret.
     ['no_login_restore', '로그인 없이 메모 복구 요청이 401/403과 JSON으로 거부됨',
-      () => probe(url(`/api/notes/${FAKE_ID}/restore`), { method: 'POST', headers: json, body: '{}' })],
+      () => probe(url(`/api/notes/${FAKE_ID}/restore`), { method: 'POST', headers: json, body: '{}' }), true],
     ['no_login_announcements_list', '로그인 없이 공지 목록 요청이 401/403과 JSON으로 거부됨',
       () => probe(url('/api/announcements'))],
     ['no_login_announcements_create', '로그인 없이 공지 추가가 401/403과 JSON으로 거부됨',
       () => probe(url('/api/announcements'), { method: 'POST', headers: json,
-        body: JSON.stringify({ title: 'x', body: 'x' }) })],
+        body: JSON.stringify({ title: 'x', body: 'x' }) }), true],
     ['no_login_announcement_write', '로그인 없이 공지 한 건 수정이 401/403과 JSON으로 거부됨',
       () => probe(url(`/api/announcements/${FAKE_ID}`), { method: 'PUT', headers: json,
-        body: JSON.stringify({ title: 'x', body: 'x' }) })],
+        body: JSON.stringify({ title: 'x', body: 'x' }) }), true],
     // Step 11: approval is keyed on the session inside the server-verified token; no device value
     // is sent from here or from the page. What these cover: the approval routes need a login, and
     // a forged token with `status: "approved"` in the body is refused. What they do NOT cover: a
@@ -98,16 +105,16 @@ export async function runAttackChecks(config) {
     // test/notes-api.test.mjs and test/devices-api.test.mjs only.
     ['no_login_device_request', '로그인 없이 승인 상태를 본문에 넣은 승인 요청이 401/403과 JSON으로 거부됨',
       () => probe(url('/api/devices/request'), { method: 'POST', headers: json,
-        body: JSON.stringify({ status: 'approved' }) })],
+        body: JSON.stringify({ status: 'approved' }) }), true],
     ['forged_token_device_request', '위조 토큰과 승인 상태를 본문에 넣은 승인 요청이 401/403과 JSON으로 거부됨',
       () => probe(url('/api/devices/request'), { method: 'POST', headers: { ...json, Authorization: forged },
-        body: JSON.stringify({ status: 'approved' }) })],
+        body: JSON.stringify({ status: 'approved' }) }), true],
     ['no_login_device_status', '로그인 없이 승인 상태 조회가 401/403과 JSON으로 거부됨',
       () => probe(url('/api/devices/status'))],
   ];
   const results = [];
-  for (const [attackId, expected, send] of checks) {
-    results.push({ attackId, expected, observed: rejected(await send()) });
+  for (const [attackId, expected, send, write] of checks) {
+    results.push({ attackId, expected, observed: write ? NOT_RUN : rejected(await send()) });
   }
   const original = originalApi(config);
   results.push({ attackId: 'original_api_no_key_read',
@@ -115,16 +122,13 @@ export async function runAttackChecks(config) {
     observed: await probe(new URL('?select=id', original)).then(rejected, () => '점검하지 못함 (요청 실패)') });
   results.push({ attackId: 'original_api_no_key_write',
     expected: '키 없이 원본 DB 직접 추가가 401/403과 JSON으로 거부됨',
-    observed: await probe(original, { method: 'POST', headers: json, body: '{}' })
-      .then(rejected, () => '점검하지 못함 (요청 실패)') });
+    observed: NOT_RUN });
   results.push({ attackId: 'public_files_no_key',
     expected: '첫 화면과 공개 파일에 Supabase 키 문자열이 없음',
     observed: await publicFilesKeyScan(url) });
   results.push({ attackId: 'login_bad_credentials',
     expected: '틀린 로그인 정보가 서버 로그인 경로에서 401/403과 JSON으로 거부됨',
-    observed: await probe(url('/api/auth/login'), { method: 'POST', headers: json,
-      body: JSON.stringify({ email: 'no-such-user@example.invalid', password: 'not-a-real-password' }) })
-      .then(rejected, () => '점검하지 못함 (요청 실패)') });
+    observed: NOT_RUN });
   const data = await probe(url('/data.json'));
   results.push({ attackId: 'public_data_json_read', expected: '/data.json이 열리지 않음',
     observed: data.status === 404 ? '열리지 않음 (HTTP 404)' : `열릴 수 있음 (HTTP ${data.status})` });

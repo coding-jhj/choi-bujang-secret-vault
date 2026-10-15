@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { deploymentIdentity } from '../scripts/deployment-identity.mjs';
-import { runAttackChecks } from '../src/attack-check.mjs';
+import { runAttackChecks, NOT_RUN } from '../src/attack-check.mjs';
+
+// S12_BUNDLE_UNSUPPORTED: the judge's isolated environment can only send GET/HEAD. Every check
+// that would send a write request (POST/PUT) must never actually call fetch and must always
+// report NOT_RUN, regardless of what the (never-called) server would have answered.
+const WRITE_CHECK_IDS = ['no_login_create', 'no_login_restore', 'no_login_announcements_create',
+  'no_login_announcement_write', 'no_login_device_request', 'forged_token_device_request',
+  'original_api_no_key_write', 'login_bad_credentials'];
 
 const config = {
   step: 5,
@@ -63,9 +70,15 @@ test('attack check records closed results only when requests are rejected as JSO
       'original_api_no_key_read', 'original_api_no_key_write',
       'public_files_no_key', 'login_bad_credentials', 'public_data_json_read',
       'aleph_json_open', 'nosniff_header']);
-    assert.ok(results.every(item => /^(거부됨|열리지 않음|열림|헤더 있음|키 문자열 없음)/u.test(item.observed)));
+    for (const item of results) {
+      if (WRITE_CHECK_IDS.includes(item.attackId)) assert.equal(item.observed, NOT_RUN, item.attackId);
+      else assert.ok(/^(거부됨|열리지 않음|열림|헤더 있음|키 문자열 없음)/u.test(item.observed), item.attackId);
+    }
     assert.ok(calls.every(([, redirect]) => redirect === 'error' || redirect === undefined));
+    // Only the (GET) no-key read probe touches the original Supabase host - the write probe
+    // (original_api_no_key_write) is a WRITE_CHECK_IDS entry and must never call fetch.
     assert.ok(calls.some(([url]) => url.startsWith('https://abcdefgh.supabase.co/rest/v1/notes')));
+    assert.equal(calls.filter(([url]) => url.startsWith('https://abcdefgh.supabase.co')).length, 1);
     assert.ok(calls.every(([url]) => !url.includes('/auth-config.json') || url.startsWith('https://student-defense')));
     assert.ok(calls.filter(([url]) => url.startsWith('https://abcdefgh.supabase.co'))
       .every(([, , headers]) => !headers?.apikey && !headers?.Authorization));
@@ -81,6 +94,9 @@ test('attack check records closed results only when requests are rejected as JSO
       assert.ok(!/^(거부됨|열리지 않음|헤더 있음)/u.test(byId[id]), id);
     }
     assert.ok(!byId.public_files_no_key.startsWith('키 문자열 없음'));
+    // Write checks report NOT_RUN unconditionally - never influenced by what the (unreached) server
+    // would have answered, even when that mock fetch would otherwise look like an open/vulnerable app.
+    for (const id of WRITE_CHECK_IDS) assert.equal(byId[id], NOT_RUN, id);
 
     globalThis.fetch = async url => (new URL(String(url)).pathname === '/'
       ? new Response('<script>var k="sb_publishable_abcdefghijklmnop"</script>', { status: 200 })

@@ -403,3 +403,52 @@
   `scripts/post-restore-retest.mjs`는 복구 응답의 `title`·`body`·`audit`만 비교하므로 필드 추가의 영향을 받지 않음을 코드로 확인했습니다(실제 배포에 대고 다시 실행하지는 않았습니다).
 - **확인하지 못한 것.** 위 결과는 로컬(인메모리 가짜 Supabase) 시험일 뿐 심판 채점이 아닙니다. 이 변경이 `UNV_AMBIGUOUS`를 해소하는지는 다시 제출해야만 알 수 있습니다. 심판이 응답의 어떤 필드를 읽는지는 알려진 바가 없으므로, 새 `verification` 필드를 심판이 실제로 쓴다는 보장도 없습니다. "재시험 여부"는 이번 변경이 응답에 담지 않습니다 — 재시험은 여전히 `scripts/post-restore-retest.mjs`(보완 5·7)를 학생이 자기 키로 실행해야 합니다.
 - 다시 실행하는 방법: `npm run test:notes` (21/21).
+
+## 11단계: 나만의 접속 앱을 완성합니다
+
+- **왜.** 단계 카드가 든 LastPass 사고는 직원의 집 컴퓨터가 뚫린 뒤 그 경로로 금고 백업까지 빼앗긴 사건입니다. 교훈은 "로그인만 맞으면 어느 기기에서든 자료가 열린다"를 끊는 것입니다. 그래서 이번 단계는 **서버가 (로그인한 사용자, 이 기기)의 승인 여부를 요청마다 데이터베이스에서 확인**하고, 승인 전에는 자료를 한 건도 돌려주지 않게 했습니다. 화면을 숨기는 것이 아니라 자료 경로 자체가 거부합니다.
+- **새 표 `public.device_approvals`** (`supabase/schema-device-approvals.sql`): `owner_id`·`device_id`·`status`(`pending`/`approved`/`revoked`만 허용)·`requested_at`·`approved_at`, `(owner_id, device_id)` 유일. `notes_backup`·`restore_audit`과 같은 방식으로 RLS를 켜고 `anon`·`authenticated` 권한을 전부 회수했습니다(서버 전용 키로만 읽고 씀). **학생이 Supabase SQL Editor에서 직접 한 번 실행해야 합니다.** 실행 전에는 모든 기기가 미승인이라 로그인해도 자료가 열리지 않습니다(실패 시 닫힘).
+- **승인은 사람만 합니다.** 승인하는 HTTP 경로는 없습니다. 학생이 SQL Editor에서 대기 행을 확인하고 한 행만 `approved`로 바꿉니다(파일 맨 아래 주석에 조회·승인·회수 SQL). 회수(`revoked`)는 캐시 없이 다음 요청부터 적용됩니다.
+- **새 API** (`src/device-approval.mjs`, `api/devices/request.js`, `api/devices/status.js`, 둘 다 로그인 필수):
+  - `POST /api/devices/request` 본문 `{ deviceId }` → `{ status }`. 새 행은 서버가 `pending`으로 만들고, 이미 있는 행은 건드리지 않습니다(`on conflict do nothing`). 그래서 다시 요청해도 `approved`가 `pending`으로 돌아가거나 `revoked`가 풀리지 않습니다. 본문의 다른 값(`status`, `owner_id` 등)은 읽지 않습니다.
+  - `GET /api/devices/status?deviceId=…` → `{ status: pending|approved|revoked|unknown }`. 매번 DB를 새로 읽고, 검증된 사용자 자신의 행만 봅니다.
+- **자료 경로의 기기 관문.** `GET/POST /api/notes`, `GET/PUT/DELETE /api/notes/:id`, `POST /api/notes/:id/restore`(성공 응답에 메모 본문이 있으므로 자료), 공지 5개 경로 전부가 같은 `requireApprovedDevice()`를 거칩니다. 순서: 로그인(401) → 허용 방법(405) → 기기 승인(403) → 자료. 기기 헤더는 `X-Device-Id`입니다.
+  - 헤더가 없거나 형식이 틀림 → 403 `DEVICE_ID_REQUIRED`
+  - 승인 행이 없거나 `pending`·`revoked`·알 수 없는 값 → 403 `DEVICE_NOT_APPROVED`
+  - 승인 조회 자체가 실패 → 502 `DEVICE_CHECK_UNAVAILABLE`
+  - 세 경우 모두 메모·공지 저장소를 아예 부르지 않습니다(시험에서 호출 0회 확인). 403을 고른 이유: 요청자는 로그인은 되었으므로(401 아님) "누구인지는 알지만 이 기기로는 허락하지 않음"이고, 기존 자기 점검(`src/attack-check.mjs`)도 401/403을 닫힘으로 봅니다.
+  - 기기 저장소 없이 API를 만들면 생성 단계에서 예외를 던집니다. 연결 실수가 "관문 없음"(열림)이 되지 않게 하려는 것입니다.
+- **화면** (`public/index.html`, 새 `public/manifest.json`, `public/icon-192.png`, `public/icon-512.png`): 설치형 앱 manifest(`display: standalone`)와 아이콘을 연결하고, "설치는 되지만 오프라인에서는 열리지 않는다"는 고정 안내 문구를 넣었습니다(서비스 워커 없음). 로그인 뒤 먼저 기기 상태를 묻고, 승인됐을 때만 기존 메모 화면을 엽니다. 아니면 승인 대기 화면(메모 없음)에 "승인 요청"·"다시 확인"·"로그아웃"과 기기 번호 끝 8자리(SQL Editor에서 행을 고를 때 씀)를 보여 줍니다. 메모 요청이 403이면 화면의 메모를 지우고 대기 화면으로 돌아갑니다.
+  - **"앱으로 설치됨·standalone 실행"은 어디에서도 신뢰 신호로 쓰지 않습니다.** 승인 여부는 서버의 `device_approvals` 행만 정합니다.
+  - 기기 번호는 `crypto.randomUUID()`로 한 번 만들어 `localStorage`(`byteback.deviceId`)에 둡니다. 로그인 토큰은 기존대로 `sessionStorage`입니다. 기기 번호는 **기기 키도 토큰도 아닌, 비밀이 아닌 이름표**입니다. 그것만으로는 아무것도 열리지 않고, 서버가 매번 (그 사용자, 그 번호)의 승인 행을 다시 확인합니다. 그래서 카드의 "기기 키나 토큰은 브라우저 저장소에 넣지 않습니다"를 어기지 않습니다.
+- **세 몬스터와의 대응** (정적으로 읽는 사람이 코드 위치를 바로 찾도록):
+
+  | 몬스터 | 공격 | 막는 곳 | 결과 |
+  |---|---|---|---|
+  | 대구두꺼운만두 | 설치형 앱 서명(로그인) 없이 보호 요청 | 각 API `guard()`의 로그인 검사(기기 검사보다 먼저) | 401 `LOGIN_REQUIRED`. 기기 헤더만 붙여도 마찬가지 |
+  | 호박엿장수마음대로 | 로그인 뒤 승인 화면을 건너뛰고 자료 경로를 직접 호출 | 자료 경로 자체의 `requireApprovedDevice()` (화면이 아님) | 403 `DEVICE_NOT_APPROVED`/`DEVICE_ID_REQUIRED`, 자료 없음 |
+  | 부산돼지미역국밥 | 로그인 뒤 본문에 `status: "approved"` 등을 넣어 승인 위조 | 요청 본문에서 `deviceId`만 읽고, 새 행은 서버가 `pending`으로 씀. 자료 경로는 본문·헤더의 승인 값을 읽지 않고 DB 행만 봄 | 언제나 `pending`, 자료는 계속 403 |
+
+- **`src/attack-check.mjs`** 자기 점검 4개 추가: 로그인 없이 새 무작위 기기 번호만 붙인 목록 요청, 위조 토큰 + 새 기기 번호, 로그인 없이 `status: "approved"`를 넣은 승인 요청, 로그인 없이 상태 조회. 새 무작위 번호는 만들어지는 순간 승인 행이 있을 수 없으므로 승인 상태와 무관하게 안전합니다. **한계: "로그인한 사용자 + 미승인 기기 → 403"은 실제 계정 토큰이 필요해 이 파일로는 시험하지 않습니다**(이 파일에 비밀을 둘 수 없음). 그 경우는 로컬 시험으로만 확인했습니다.
+- **`scripts/post-restore-retest.mjs`(10단계 재시험 도구)도 맞췄습니다.** 관문이 생기면 이 도구의 정상 요청이 전부 403이 되므로, 임시 계정마다 무작위 기기 번호를 관리자 키로 `approved` 행에 직접 넣고(학생이 SQL Editor에서 하는 일과 같음) 그 계정 요청에만 `X-Device-Id`를 붙입니다. 정리 대상 표에 `device_approvals`를 더했고, `restore_audit`은 여전히 지우지 않습니다.
+- `aleph.config.json`: `allowedRoutes`에 `POST /api/devices/request`, `GET /api/devices/status`를 추가했습니다. 검토·확인 뒤 `step`을 10에서 11로 올렸습니다(`src/attack-check.mjs`의 단계 가드와 100점 기준 3번이 이 값에 달려 있음).
+- `src/decider.mjs`는 바꾸지 않았습니다. 이번 기기 승인은 판정기의 `deviceRegistered`(외부 릴레이가 채우는 값)와 별개인 새 장치입니다.
+- 한계:
+  - **이 관문이 막지 못하는 것.** 기기 번호는 브라우저 저장소에서 읽을 수 있으므로, 승인된 기기 자체가 뚫리면(악성코드·키로거·XSS) 공격자는 그 번호와 토큰을 함께 가져가 쓸 수 있습니다. LastPass 사고가 바로 "승인된 직원 기기가 뚫린" 경우였으므로, 이 단계만으로 그 사고를 막았다고 말하지 않습니다. 막는 것은 "다른 곳에서 훔친 토큰만으로 새 기기에서 여는 것"입니다. 진짜 기기 결속에는 내보낼 수 없는 키와 서명 도전(예: WebCrypto 비추출 키, DPoP)이 필요하며 이번 단계에는 없습니다.
+  - 승인 요청 경로에는 횟수 제한이 없습니다. 로그인한 사용자가 기기 번호를 바꿔 가며 `pending` 행을 계속 만들 수 있습니다(자기 행만 늘어나며 자료는 열리지 않음).
+  - Chrome이 이 manifest로 실제 설치 버튼을 보여 주는지는 배포 사이트에서 확인하지 않았습니다.
+- **심판 계정도 같은 관문을 거칩니다(확인되지 않음, 위험 있음).** 심판 토큰(`src/verify-login.mjs`의 judge 분기)을 예외로 두지 않았습니다. 예외를 두면 심판이 보내는 경로 우회·본문 위조 공격이 그대로 통과하기 때문입니다. 반대로, 심판이 정상 요청(예: 4·10단계의 "A는 자기 메모를 읽는다")에 승인된 기기 번호를 함께 보내지 못하면 그 정상 확인들이 403으로 바뀝니다. 심판 `sub`는 실행마다 달라 보이고 심판은 이 Supabase에 승인 행을 쓸 수 없으므로, 심판이 어떻게 "승인된 기기"를 갖추는지는 **알 수 없습니다.** 실제 제출 결과로만 확인할 수 있습니다.
+- 확인한 것(이번 작업에서 실제로 실행한 결과):
+  ```
+  npm run test:notes    → tests 26, pass 26, fail 0  (기존 21 + 11단계 5)
+  npm run test:devices  → tests 7,  pass 7,  fail 0  (새 파일 test/devices-api.test.mjs)
+  npm run test:r5 3/3 · test:package 3/3 · test:auth 5/5 · xdr-run 3/3
+  npm run decider:test 4/4 통과 · npm run detect:test 6/6 통과 · npm run build -- --local 성공
+  뮤테이션 3개 → 전부 잡아냄, 원래 코드로 되돌린 뒤 파일이 바이트 단위로 같음을 cmp로 확인
+    관문이 revoked만 거부(pending·처음 보는 기기 통과)  → 메모 시험 2개 실패
+    notes-api guard에서 관문 호출 삭제                    → 메모 시험 4개 실패
+    재요청이 기존 행을 덮어씀(ignoreDuplicates: false)    → 기기 시험 2개 실패
+  ```
+  headless Chrome으로 `public/index.html`을 가짜 API 서버에 띄워 화면 흐름도 확인했습니다(커밋하지 않은 즉석 점검): 로그인 직후 대기 화면, 메모 요청 0건 → "승인 요청" 본문은 `{"deviceId":…}` 하나, 상태 `pending` → 서버에서 승인 뒤 "다시 확인" → 기존 메모 화면이 열림 → 메모 추가 성공, `/api/notes`의 GET·POST·GET 세 요청 모두 저장된 기기 번호를 `X-Device-Id`로 보냄 → 새로고침 뒤 같은 기기 번호 유지 → 서버에서 회수 뒤 다음 요청이 403, 메모가 화면에서 지워지고 상태 "회수됨". `localStorage`에는 토큰이 없음.
+- 확인하지 못한 것: 실제 Supabase 표 생성·실제 배포·실제 계정 두 개로 한 시험·심판 채점은 하지 않았습니다. 위 결과는 모두 로컬(인메모리 가짜 Supabase, 가짜 API 서버) 결과입니다.
+- 다시 실행하는 방법: `npm run test:notes`, `npm run test:devices`, `npm run test:r5`, `npm run test:package`, `npm run test:auth`, `npm run decider:test`, `npm run detect:test`.

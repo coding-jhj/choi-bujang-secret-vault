@@ -5,6 +5,8 @@ import { createNotesApi, createSupabaseStore } from '../src/notes-api.mjs';
 import { createNotesRestoreApi, createSupabaseStore as createRestoreStore } from '../src/notes-restore-api.mjs';
 import { createLoginVerifier } from '../src/verify-login.mjs';
 import { CLEANUP_TABLES, runRetest } from '../scripts/post-restore-retest.mjs';
+import { createDeviceApprovalStore } from '../src/device-approval.mjs';
+import { fakeDeviceDb } from './fake-device-db.mjs';
 
 const A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -28,10 +30,20 @@ const verify = async authorization => {
   return null;
 };
 
-function call(handler, { method = 'GET', token, body, query } = {}) {
+// Step 11: every data API needs a device store. Tests written before step 11 run as an approved
+// device: `call` sends APPROVED_DEVICE whenever a token is given, unless `device` overrides it
+// (`device: null` = send no X-Device-Id header at all).
+const APPROVED_DEVICE = 'approved-device-0000000000000001';
+const devices = { status: async (_owner, deviceId) => (deviceId === APPROVED_DEVICE ? 'approved' : 'unknown') };
+
+function call(handler, { method = 'GET', token, body, query, device } = {}) {
   return new Promise(resolve => {
     const headers = new Map();
-    const request = { method, query, body, headers: token ? { authorization: `Bearer ${token}` } : {} };
+    const requestHeaders = {};
+    if (token) requestHeaders.authorization = `Bearer ${token}`;
+    const deviceId = device === undefined ? (token ? APPROVED_DEVICE : undefined) : device;
+    if (deviceId !== undefined && deviceId !== null) requestHeaders['x-device-id'] = deviceId;
+    const request = { method, query, body, headers: requestHeaders };
     const response = {
       setHeader: (k, v) => headers.set(k.toLowerCase(), v),
       status(code) { return { json: payload => resolve({ status: code, body: payload, headers }) }; },
@@ -41,7 +53,7 @@ function call(handler, { method = 'GET', token, body, query } = {}) {
 }
 
 test('로그인 없이는 모든 경로가 401과 JSON 오류로 거부된다', async () => {
-  const api = createNotesApi({ verify, store: memoryStore() });
+  const api = createNotesApi({ devices, verify, store: memoryStore() });
   for (const method of ['GET', 'POST']) {
     const result = await call(api.collection, { method, body: { title: 't', body: 'b' } });
     assert.equal(result.status, 401);
@@ -56,12 +68,12 @@ test('로그인 없이는 모든 경로가 401과 JSON 오류로 거부된다', 
 });
 
 test('검증기가 예외를 던져도 거부한다', async () => {
-  const api = createNotesApi({ verify: async () => { throw new Error('boom'); }, store: memoryStore() });
+  const api = createNotesApi({ devices, verify: async () => { throw new Error('boom'); }, store: memoryStore() });
   assert.equal((await call(api.collection, { token: 'user-a' })).status, 401);
 });
 
 test('로그인한 사용자는 메모를 추가·조회·수정·삭제하고 지운 뒤 GET은 404다', async () => {
-  const api = createNotesApi({ verify, store: memoryStore() });
+  const api = createNotesApi({ devices, verify, store: memoryStore() });
   const created = await call(api.collection, { method: 'POST', token: 'user-a', body: { title: '제목', body: '내용' } });
   assert.equal(created.status, 201);
   const { id } = created.body;
@@ -75,7 +87,7 @@ test('로그인한 사용자는 메모를 추가·조회·수정·삭제하고 �
 });
 
 test('다른 사용자의 메모는 읽기·수정·삭제 모두 404이고 내용이 바뀌지 않는다', async () => {
-  const api = createNotesApi({ verify, store: memoryStore() });
+  const api = createNotesApi({ devices, verify, store: memoryStore() });
   const { id } = (await call(api.collection, { method: 'POST', token: 'user-a', body: { title: 'A 메모', body: 'A 내용' } })).body;
   const other = { token: 'user-b', query: { id } };
   assert.deepEqual((await call(api.item, other)).body, { error: 'NOT_FOUND' });
@@ -88,7 +100,7 @@ test('다른 사용자의 메모는 읽기·수정·삭제 모두 404이고 내�
 });
 
 test('잘못된 입력과 id, 허용되지 않은 방법을 거부한다', async () => {
-  const api = createNotesApi({ verify, store: memoryStore() });
+  const api = createNotesApi({ devices, verify, store: memoryStore() });
   for (const body of [null, {}, { title: '', body: 'x' }, { title: 'x' }, { title: 'x', body: 1 },
     { title: 'x'.repeat(201), body: '' }, { title: 'x', body: 'y'.repeat(5001) }, [], 'not json']) {
     assert.equal((await call(api.collection, { method: 'POST', token: 'user-a', body })).status, 400);
@@ -101,9 +113,96 @@ test('잘못된 입력과 id, 허용되지 않은 방법을 거부한다', async
 test('저장소 오류는 내부 내용 없이 502로만 알린다', async () => {
   const store = memoryStore();
   store.list = async () => { throw new Error('secret db detail'); };
-  const result = await call(createNotesApi({ verify, store }).collection, { token: 'user-a' });
+  const result = await call(createNotesApi({ devices, verify, store }).collection, { token: 'user-a' });
   assert.equal(result.status, 502);
   assert.deepEqual(result.body, { error: 'NOTES_UNAVAILABLE' });
+});
+
+// ---- Step 11: device approval gate on the real data routes ----
+// The real createDeviceApprovalStore over a fake device_approvals table, and a notes store that
+// counts every call, so "no data" means the store was never even asked.
+const NEW_DEVICE = '0f0f0f0f-1e1e-4d2d-8c3c-4b4b4b4b4b4b';
+function countingStore() {
+  const store = memoryStore();
+  let calls = 0;
+  const counted = Object.fromEntries(Object.entries(store).map(([k, fn]) => [k, async (...a) => { calls += 1; return fn(...a); }]));
+  return { store, counted, calls: () => calls };
+}
+
+test('11단계: X-Device-Id가 없으면 로그인해도 모든 메모 경로가 403이고 저장소를 읽지 않는다', async () => {
+  const { store, counted, calls } = countingStore();
+  const id = await store.create(A, { title: 'A 메모', body: 'A 내용' });
+  const api = createNotesApi({ verify, store: counted, devices: createDeviceApprovalStore(fakeDeviceDb()) });
+  const tries = [
+    [api.collection, 'GET', undefined], [api.collection, 'POST', undefined],
+    [api.item, 'GET', { id }], [api.item, 'PUT', { id }], [api.item, 'DELETE', { id }],
+  ];
+  for (const [handler, method, query] of tries) {
+    for (const device of [null, '', 'short', `${NEW_DEVICE}, ${NEW_DEVICE}`]) {
+      const result = await call(handler, { method, token: 'user-a', query, device, body: { title: 't', body: 'b' } });
+      assert.deepEqual([result.status, result.body], [403, { error: 'DEVICE_ID_REQUIRED' }], `${method} ${device}`);
+      assert.equal(result.headers.get('cache-control'), 'no-store');
+    }
+  }
+  assert.equal(calls(), 0);
+  // Login is still checked first: no token -> 401, even with a device header.
+  assert.equal((await call(api.collection, { device: NEW_DEVICE })).status, 401);
+});
+
+test('11단계: 승인되지 않은 기기(처음 보는·대기·회수)는 403이고 메모 내용이 응답에 없다 (경로 우회)', async () => {
+  const { store, counted, calls } = countingStore();
+  const id = await store.create(A, { title: 'A 비밀 제목', body: 'A 비밀 내용' });
+  const db = fakeDeviceDb();
+  const deviceStore = createDeviceApprovalStore(db);
+  const api = createNotesApi({ verify, store: counted, devices: deviceStore });
+  const restore = createNotesRestoreApi({ verify, store: createRestoreStore(fakeSupabase()), devices: deviceStore });
+  const probe = async () => {
+    const results = [
+      await call(api.collection, { token: 'user-a', device: NEW_DEVICE }),
+      await call(api.item, { token: 'user-a', device: NEW_DEVICE, query: { id } }),
+      await call(api.item, { method: 'PUT', token: 'user-a', device: NEW_DEVICE, query: { id }, body: { title: 'x', body: 'x' } }),
+      await call(restore.item, { method: 'POST', token: 'user-a', device: NEW_DEVICE, query: { id } }),
+    ];
+    for (const result of results) {
+      assert.deepEqual([result.status, result.body], [403, { error: 'DEVICE_NOT_APPROVED' }]);
+      assert.ok(!JSON.stringify(result.body).includes('비밀'));
+    }
+  };
+  await probe(); // never requested
+  await deviceStore.request(A, NEW_DEVICE);
+  await probe(); // pending
+  db.setStatus(A, NEW_DEVICE, 'revoked');
+  await probe(); // revoked
+  assert.equal(calls(), 0);
+  assert.deepEqual(await store.get(A, id), { id, title: 'A 비밀 제목', body: 'A 비밀 내용' });
+});
+
+test('11단계: 승인된 기기에서는 기존 화면의 메모 요청이 그대로 동작하고, 회수하면 다음 요청부터 막힌다', async () => {
+  const db = fakeDeviceDb();
+  const deviceStore = createDeviceApprovalStore(db);
+  const api = createNotesApi({ verify, store: memoryStore(), devices: deviceStore });
+  await deviceStore.request(A, NEW_DEVICE);
+  db.setStatus(A, NEW_DEVICE, 'approved');
+  const created = await call(api.collection, { method: 'POST', token: 'user-a', device: NEW_DEVICE, body: { title: '제목', body: '내용' } });
+  assert.equal(created.status, 201);
+  const { id } = created.body;
+  assert.deepEqual((await call(api.collection, { token: 'user-a', device: NEW_DEVICE })).body, [{ id, title: '제목', body: '내용' }]);
+  assert.deepEqual((await call(api.item, { method: 'PUT', token: 'user-a', device: NEW_DEVICE, query: { id }, body: { title: '새', body: '새 내용' } })).body,
+    { id, title: '새', body: '새 내용' });
+  // The approval belongs to (A, device): B on the same device id is refused before ownership is even looked at.
+  assert.deepEqual((await call(api.item, { token: 'user-b', device: NEW_DEVICE, query: { id } })).body, { error: 'DEVICE_NOT_APPROVED' });
+  db.setStatus(A, NEW_DEVICE, 'revoked');
+  assert.equal((await call(api.collection, { token: 'user-a', device: NEW_DEVICE })).status, 403);
+});
+
+test('11단계: 기기 승인 조회가 실패하면 자료 없이 502로 닫힌다', async () => {
+  const { counted, calls } = countingStore();
+  const api = createNotesApi({ verify, store: counted, devices: createDeviceApprovalStore(fakeDeviceDb({ fail: true })) });
+  const result = await call(api.collection, { token: 'user-a', device: NEW_DEVICE });
+  assert.deepEqual([result.status, result.body], [502, { error: 'DEVICE_CHECK_UNAVAILABLE' }]);
+  assert.equal(calls(), 0);
+  assert.throws(() => createNotesApi({ verify, store: memoryStore() }), /device_store_required/u);
+  assert.throws(() => createNotesRestoreApi({ verify, store: memoryStore() }), /device_store_required/u);
 });
 
 test('Supabase 저장소는 content 칸을 body로 바꿔 돌려주고 DB 오류를 던진다', async () => {
@@ -196,7 +295,7 @@ function splitVerification(result) {
 
 test('10단계: POST만 저장된 값으로 사본을 만들고, PUT·DELETE는 사본을 건드리지 않는다', async () => {
   const db = fakeSupabase();
-  const api = createNotesApi({ verify, store: createSupabaseStore(db) });
+  const api = createNotesApi({ devices, verify, store: createSupabaseStore(db) });
   const created = await call(api.collection, { method: 'POST', token: 'user-b', body: { title: '  원래 제목 ', body: '원래 내용' } });
   assert.equal(created.status, 201);
   assert.deepEqual(created.body, { id: created.body.id });
@@ -217,7 +316,7 @@ test('10단계: POST만 저장된 값으로 사본을 만들고, PUT·DELETE는 
 
 test('10단계: 사본 쓰기가 실패해도 메모 저장은 201이고, 서버 로그에 메모 id만 남긴다', async () => {
   const db = fakeSupabase({ failInsert: ['notes_backup'] });
-  const api = createNotesApi({ verify, store: createSupabaseStore(db) });
+  const api = createNotesApi({ devices, verify, store: createSupabaseStore(db) });
   const logged = [];
   const originalError = console.error;
   console.error = (...args) => logged.push(args.join(' '));
@@ -234,8 +333,8 @@ test('10단계: 사본 쓰기가 실패해도 메모 저장은 201이고, 서버
 
 test('10단계: 만들고 → PUT으로 변조 → 복구하면 원래 내용이 돌아오고 감사 기록 1건만 늘어난다', async () => {
   const db = fakeSupabase();
-  const notes = createNotesApi({ verify, store: createSupabaseStore(db) });
-  const restore = createNotesRestoreApi({ verify, store: createRestoreStore(db) });
+  const notes = createNotesApi({ devices, verify, store: createSupabaseStore(db) });
+  const restore = createNotesRestoreApi({ devices, verify, store: createRestoreStore(db) });
   const { id } = (await call(notes.collection, { method: 'POST', token: 'user-b', body: { title: 'B 메모', body: 'B 원래 내용' } })).body;
   const other = (await call(notes.collection, { method: 'POST', token: 'user-a', body: { title: 'A 메모', body: 'A 내용' } })).body.id;
   await call(notes.item, { method: 'PUT', token: 'user-b', query: { id }, body: { title: '변조', body: '변조된 내용' } });
@@ -263,8 +362,8 @@ const verifyMixed = async authorization => {
 
 test('10단계: 응답은 저장된 행의 id·소유자·내용 해시를 돌려주고 세 값이 사본과 같다', async () => {
   const db = fakeSupabase({ pgUuid: true });
-  const notes = createNotesApi({ verify, store: createSupabaseStore(db) });
-  const restore = createNotesRestoreApi({ verify, store: createRestoreStore(db) });
+  const notes = createNotesApi({ devices, verify, store: createSupabaseStore(db) });
+  const restore = createNotesRestoreApi({ devices, verify, store: createRestoreStore(db) });
   const { id } = (await call(notes.collection, { method: 'POST', token: 'user-b', body: { title: 'B', body: '원본 내용' } })).body;
   await call(notes.item, { method: 'PUT', token: 'user-b', query: { id }, body: { title: '변조', body: '변조' } });
   const restored = await call(restore.item, { method: 'POST', token: 'user-b', query: { id } });
@@ -288,7 +387,7 @@ test('10단계 보완 8: 해시가 변조된 사본은 409이고, 응답의 veri
   const { id } = await tamperedNote(db);
   const [copy] = db.tables.notes_backup;
   copy.content = '사본 내용을 몰래 바꿈';
-  const result = await call(createNotesRestoreApi({ verify, store: createRestoreStore(db) }).item,
+  const result = await call(createNotesRestoreApi({ devices, verify, store: createRestoreStore(db) }).item,
     { method: 'POST', token: 'user-b', query: { id } });
   const [status, rest, verification] = splitVerification(result);
   assert.deepEqual([status, rest], [409, { error: 'BACKUP_HASH_MISMATCH' }]);
@@ -302,7 +401,7 @@ test('10단계 보완 8: 해시가 변조된 사본은 409이고, 응답의 veri
 test('10단계 보완 8: 남의 메모 복구는 404이고, verification은 사본도 대조도 드러내지 않는다', async () => {
   const db = fakeSupabase({ pgUuid: true });
   const { id } = await tamperedNote(db);
-  const result = await call(createNotesRestoreApi({ verify, store: createRestoreStore(db) }).item,
+  const result = await call(createNotesRestoreApi({ devices, verify, store: createRestoreStore(db) }).item,
     { method: 'POST', token: 'user-a', query: { id } });
   const [status, rest, verification] = splitVerification(result);
   assert.deepEqual([status, rest], [404, { error: 'NOT_FOUND' }]);
@@ -314,8 +413,8 @@ test('10단계 보완 8: 남의 메모 복구는 404이고, verification은 사�
 
 test('10단계: 대소문자가 다른 같은 uuid의 주체(심판 sub)도 자기 메모를 복구한다', async () => {
   const db = fakeSupabase({ pgUuid: true });
-  const notes = createNotesApi({ verify: verifyMixed, store: createSupabaseStore(db) });
-  const restore = createNotesRestoreApi({ verify: verifyMixed, store: createRestoreStore(db) });
+  const notes = createNotesApi({ devices, verify: verifyMixed, store: createSupabaseStore(db) });
+  const restore = createNotesRestoreApi({ devices, verify: verifyMixed, store: createRestoreStore(db) });
   const { id } = (await call(notes.collection, { method: 'POST', token: 'judge-b-upper', body: { title: 'B', body: 'B 원본' } })).body;
   assert.equal((await call(notes.item, { method: 'PUT', token: 'judge-b-upper', query: { id }, body: { title: 'x', body: '변조' } })).status, 200);
   const restored = await call(restore.item, { method: 'POST', token: 'judge-b-upper', query: { id } });
@@ -329,14 +428,14 @@ test('10단계: 대소문자가 다른 같은 uuid의 주체(심판 sub)도 자�
 
 test('10단계: 사본의 id·소유자가 요청과 다르면 쓰기 전에 409로 멈춘다', async () => {
   const db = fakeSupabase({ pgUuid: true });
-  const notes = createNotesApi({ verify, store: createSupabaseStore(db) });
+  const notes = createNotesApi({ devices, verify, store: createSupabaseStore(db) });
   const { id } = (await call(notes.collection, { method: 'POST', token: 'user-b', body: { title: 'B', body: 'B 원본' } })).body;
   await call(notes.item, { method: 'PUT', token: 'user-b', query: { id }, body: { title: 'x', body: '변조' } });
   for (const lie of [{ ownerId: A }, { sourceNoteId: '00000000-0000-4000-8000-00000000abcd' }]) {
     const store = createRestoreStore(db);
     const real = store.findBackup;
     store.findBackup = async (...args) => ({ ...(await real(...args)), ...lie });
-    const result = await call(createNotesRestoreApi({ verify, store }).item, { method: 'POST', token: 'user-b', query: { id } });
+    const result = await call(createNotesRestoreApi({ devices, verify, store }).item, { method: 'POST', token: 'user-b', query: { id } });
     const [status, rest, verification] = splitVerification(result);
     assert.deepEqual([status, rest], [409, { error: 'RESTORE_MISMATCH' }]);
     assert.deepEqual([verification.idMatch, verification.ownerMatch, verification.hashMatch],
@@ -369,7 +468,7 @@ async function captureErrors(fn) {
 }
 
 async function tamperedNote(db) {
-  const notes = createNotesApi({ verify, store: createSupabaseStore(db) });
+  const notes = createNotesApi({ devices, verify, store: createSupabaseStore(db) });
   const { id } = (await call(notes.collection, { method: 'POST', token: 'user-b', body: { title: 'B', body: 'B 원본 내용' } })).body;
   await call(notes.item, { method: 'PUT', token: 'user-b', query: { id }, body: { title: 'x', body: '변조' } });
   return { id, notes };
@@ -382,7 +481,7 @@ test('10단계: 쓴 뒤 검증이 실패하면 복구 전 상태로 되돌리고
   const store = createRestoreStore(db);
   truncatingFirstWrite(store, 'updateNote');
   const { result, logged } = await captureErrors(() =>
-    call(createNotesRestoreApi({ verify, store }).item, { method: 'POST', token: 'user-b', query: { id } }));
+    call(createNotesRestoreApi({ devices, verify, store }).item, { method: 'POST', token: 'user-b', query: { id } }));
   const [status, rest, verification] = splitVerification(result);
   assert.deepEqual([status, rest], [502, { error: 'RESTORE_UNVERIFIED_ROLLED_BACK' }]);
   assert.deepEqual(db.tables.notes.find(n => n.id === id), before);
@@ -401,7 +500,7 @@ test('10단계: 지워진 메모를 되살리다 검증이 실패하면 방금 �
   const store = createRestoreStore(db);
   truncatingFirstWrite(store, 'insertNote');
   const { result } = await captureErrors(() =>
-    call(createNotesRestoreApi({ verify, store }).item, { method: 'POST', token: 'user-b', query: { id } }));
+    call(createNotesRestoreApi({ devices, verify, store }).item, { method: 'POST', token: 'user-b', query: { id } }));
   const [status, rest, verification] = splitVerification(result);
   assert.deepEqual([status, rest], [502, { error: 'RESTORE_UNVERIFIED_ROLLED_BACK' }]);
   assert.deepEqual([verification.rolledBack, verification.persistedSha256, verification.audit], [true, null, 'not_written']);
@@ -426,7 +525,7 @@ test('10단계: 되돌리기까지 실패하면 다른 오류 코드로 알리�
     if (remove) { truncatingFirstWrite(store, 'insertNote'); store.deleteNote = remove; }
     else truncatingFirstWrite(store, 'updateNote', update);
     const { result, logged } = await captureErrors(() =>
-      call(createNotesRestoreApi({ verify, store }).item, { method: 'POST', token: 'user-b', query: { id } }));
+      call(createNotesRestoreApi({ devices, verify, store }).item, { method: 'POST', token: 'user-b', query: { id } }));
     const [status, rest, verification] = splitVerification(result);
     assert.deepEqual([status, rest], [502, { error: 'RESTORE_UNVERIFIED_ROLLBACK_FAILED' }], name);
     assert.deepEqual([verification.rolledBack, verification.persistedSha256, verification.audit],
@@ -442,7 +541,7 @@ test('10단계: 감사 행 쓰기가 실패하면 복구는 200이어도 audit "
   const db = fakeSupabase({ pgUuid: true, failInsert: ['restore_audit'] });
   const { id } = await tamperedNote(db);
   const { result, logged } = await captureErrors(() =>
-    call(createNotesRestoreApi({ verify, store: createRestoreStore(db) }).item, { method: 'POST', token: 'user-b', query: { id } }));
+    call(createNotesRestoreApi({ devices, verify, store: createRestoreStore(db) }).item, { method: 'POST', token: 'user-b', query: { id } }));
   assert.equal(result.status, 200);
   assert.equal(result.body.audit, 'failed');
   assert.equal(result.body.verification.audit, 'failed');
@@ -477,9 +576,42 @@ test('10단계: 복구 재시험 도구의 정리는 restore_audit를 절대 지
   });
   assert.equal(cleanupOk, true);
   assert.deepEqual(ops.filter(([, table]) => table === 'restore_audit'), []);
-  assert.deepEqual(ops.filter(([op]) => op === 'delete').map(([, table]) => table), ['notes_backup', 'notes']);
+  assert.deepEqual(ops.filter(([op]) => op === 'delete').map(([, table]) => table), ['notes_backup', 'notes', 'device_approvals']);
   assert.deepEqual(ops.filter(([op]) => op === 'deleteUser'), [['deleteUser', owner]]);
   assert.equal(CLEANUP_TABLES.includes('restore_audit'), false);
+});
+
+test('11단계: 복구 재시험 도구는 임시 계정마다 승인된 기기를 만들어 그 계정의 요청에만 보낸다', async () => {
+  const inserts = [];
+  const sent = [];
+  let n = 0;
+  const admin = {
+    auth: { admin: {
+      createUser: async () => ({ data: { user: { id: `12345678-1234-4234-8234-12345678900${++n}` } }, error: null }),
+      deleteUser: async () => ({ error: null }),
+    } },
+    from(table) {
+      const q = {
+        insert: async row => { inserts.push([table, row]); return { error: null }; },
+        delete() { return q; }, select() { return q; }, in: async () => ({ error: null, count: 0 }),
+      };
+      return q;
+    },
+  };
+  let t = 0;
+  await runRetest({ app: new URL('https://example-app.vercel.app/'), domain: 'example.invalid' }, {
+    admin, out: () => {},
+    newAuthClient: () => ({ auth: { signInWithPassword: async () => ({ data: { session: { access_token: `tok-${++t}` } }, error: null }) } }),
+    fetchImpl: async (_url, init) => { sent.push(init.headers); return new Response('{}', { status: 401 }); },
+  });
+  assert.deepEqual(inserts.map(([table, row]) => [table, row.owner_id, row.status]), [
+    ['device_approvals', '12345678-1234-4234-8234-123456789001', 'approved'],
+    ['device_approvals', '12345678-1234-4234-8234-123456789002', 'approved']]);
+  const deviceFor = Object.fromEntries(inserts.map(([, row], i) => [`Bearer tok-${i + 1}`, row.device_id]));
+  assert.ok(sent.some(h => h.Authorization));
+  for (const headers of sent) {
+    assert.equal(headers['X-Device-Id'], headers.Authorization ? deviceFor[headers.Authorization] : undefined);
+  }
 });
 
 test('로그인 검증기는 형식이 틀린 토큰과 알 수 없는 발급자를 거부한다', async () => {

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { createLoginVerifier } from './verify-login.mjs';
+import { assertDeviceStore, createDeviceApprovalStore, requireApprovedDevice } from './device-approval.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const MAX_TITLE = 200;
@@ -24,7 +25,12 @@ function readBody(request) {
 }
 
 // verify(authorization) -> { userId } | null.  store holds all database access.
-export function createNotesApi({ verify, store }) {
+// devices.status(ownerId, deviceId) -> approval status (step 11). Required: see device-approval.mjs.
+export function createNotesApi({ verify, store, devices }) {
+  assertDeviceStore(devices);
+  // Order: login (401) -> method (405) -> device approval (403) -> data. Every route of this
+  // API goes through here, so calling the data route directly (skipping any screen) still meets
+  // the device check, and no note is read before it passes.
   async function guard(request, response, allowed) {
     let user = null;
     try { user = await verify(request.headers?.authorization); } catch { user = null; }
@@ -34,6 +40,7 @@ export function createNotesApi({ verify, store }) {
       send(response, 405, { error: 'METHOD_NOT_ALLOWED' });
       return null;
     }
+    if (!(await requireApprovedDevice(devices, user, request, response))) return null;
     return user;
   }
 
@@ -146,5 +153,6 @@ export function createRuntimeNotesApi(config, env = process.env) {
   if (!url || !key) throw new Error('SERVER_NOT_CONFIGURED');
   const verify = createLoginVerifier({ config, supabaseSecretKey: key });
   const client = createClient(url, key, { auth: { persistSession: false } });
-  return createNotesApi({ verify, store: createSupabaseStore(client) });
+  return createNotesApi({ verify, store: createSupabaseStore(client),
+    devices: createDeviceApprovalStore(client) });
 }

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { createLoginVerifier } from './verify-login.mjs';
+import { assertDeviceStore, createDeviceApprovalStore, requireApprovedDevice } from './device-approval.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const HEX64 = /^[0-9a-f]{64}$/iu;
@@ -43,7 +44,11 @@ function sameRecord(expected, actual) {
 
 // POST /api/notes/:id/restore — restores ONE note of the verified user from notes_backup.
 // verify(authorization) -> { userId } | null.  store holds all database access.
-export function createNotesRestoreApi({ verify, store }) {
+// devices: step 11 device approval store (required). A successful restore answers with the note's
+// title and body, so it is vault data and goes through the same device gate as notes-api.mjs.
+// A gate refusal (like 401/405) is answered before the `verification` object exists.
+export function createNotesRestoreApi({ verify, store, devices }) {
+  assertDeviceStore(devices);
   async function guard(request, response, allowed) {
     let user = null;
     try { user = await verify(request.headers?.authorization); } catch { user = null; }
@@ -53,6 +58,7 @@ export function createNotesRestoreApi({ verify, store }) {
       send(response, 405, { error: 'METHOD_NOT_ALLOWED' });
       return null;
     }
+    if (!(await requireApprovedDevice(devices, user, request, response))) return null;
     return user;
   }
 
@@ -231,5 +237,6 @@ export function createRuntimeNotesRestoreApi(config, env = process.env) {
   if (!url || !key) throw new Error('SERVER_NOT_CONFIGURED');
   const verify = createLoginVerifier({ config, supabaseSecretKey: key });
   const client = createClient(url, key, { auth: { persistSession: false } });
-  return createNotesRestoreApi({ verify, store: createSupabaseStore(client) });
+  return createNotesRestoreApi({ verify, store: createSupabaseStore(client),
+    devices: createDeviceApprovalStore(client) });
 }

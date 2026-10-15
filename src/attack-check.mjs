@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 // The student changes this check as each stage adds an attack to the same app.
 // Never return tokens, private keys, real names, or note bodies.
 const closedStatus = status => status === 401 || status === 403;
@@ -90,6 +92,21 @@ export async function runAttackChecks(config) {
     ['no_login_announcement_write', '로그인 없이 공지 한 건 수정이 401/403과 JSON으로 거부됨',
       () => probe(url(`/api/announcements/${FAKE_ID}`), { method: 'PUT', headers: json,
         body: JSON.stringify({ title: 'x', body: 'x' }) })],
+    // Step 11: a brand-new random device id is unapproved by construction (no device_approvals
+    // row can exist for it), so these probes never depend on approval state. What they cover:
+    // a device header alone (with no login, or with a forged token) opens nothing, and the device
+    // routes need a login. What they do NOT cover: a LOGGED-IN request from an unapproved device
+    // (403 DEVICE_NOT_APPROVED) - that needs a real account token, which this file must never
+    // hold. That case is covered by test/notes-api.test.mjs and test/devices-api.test.mjs only.
+    ['no_login_new_device_list', '로그인 없이 새 기기 번호만 붙인 목록 요청이 401/403과 JSON으로 거부됨',
+      () => probe(url('/api/notes'), { headers: { 'X-Device-Id': randomUUID() } })],
+    ['forged_token_new_device_list', '위조 토큰과 새 기기 번호로 보낸 목록 요청이 401/403과 JSON으로 거부됨',
+      () => probe(url('/api/notes'), { headers: { Authorization: forged, 'X-Device-Id': randomUUID() } })],
+    ['no_login_device_request', '로그인 없이 승인 상태를 본문에 넣은 기기 승인 요청이 401/403과 JSON으로 거부됨',
+      () => probe(url('/api/devices/request'), { method: 'POST', headers: json,
+        body: JSON.stringify({ deviceId: randomUUID(), status: 'approved' }) })],
+    ['no_login_device_status', '로그인 없이 기기 승인 상태 조회가 401/403과 JSON으로 거부됨',
+      () => probe(url(`/api/devices/status?deviceId=${randomUUID()}`))],
   ];
   const results = [];
   for (const [attackId, expected, send] of checks) {

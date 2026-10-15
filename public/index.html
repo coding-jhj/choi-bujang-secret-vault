@@ -4,6 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BYTE BACK | 내 자료실</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#101a28">
+  <link rel="icon" href="/icon-192.png" type="image/png">
   <style>
     :root { color-scheme: dark; font-family: system-ui, sans-serif; }
     body { margin: 0; min-height: 100vh; background: #101a28; color: #ecf4ff; }
@@ -21,6 +24,8 @@
     strong { display: block; font-size: 18px; margin-bottom: 5px; }
     li span { color: #bfd0e5; white-space: pre-wrap; }
     .actions { display: flex; gap: 8px; margin-top: 12px; }
+    .notice { font-size: 14px; color: #8fa6bf; }
+    code { color: #8ad8df; }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -29,6 +34,17 @@
     <div class="eyebrow">BYTE BACK · 5단계 서버 한곳</div>
     <h1>내 자료실</h1>
     <p class="status" id="status" role="status" aria-live="polite"></p>
+    <p class="notice">이 화면은 앱으로 설치할 수 있지만 오프라인에서는 열리지 않습니다. 자료는 매번 서버가 로그인과 기기 승인을 확인한 뒤에만 보입니다.</p>
+
+    <section id="device" hidden>
+      <p>이 기기는 아직 자료실을 열도록 승인되지 않았습니다. 승인 전에는 메모를 불러오지 않습니다.</p>
+      <p>기기 번호 끝자리: <code id="device-tail"></code> · 상태: <span id="device-state"></span></p>
+      <div class="actions">
+        <button type="button" id="device-request">승인 요청</button>
+        <button type="button" class="ghost" id="device-check">다시 확인</button>
+        <button type="button" class="ghost" id="device-logout">로그아웃</button>
+      </div>
+    </section>
 
     <form id="login" hidden>
       <p>로그인해야 내 가상 메모를 볼 수 있습니다.</p>
@@ -54,6 +70,27 @@
     const KEEP = 'byteback.session';
     let session = null;
     let editingId = null;
+
+    // 11단계 기기 번호. 비밀이 아닌 임의 식별자(crypto.randomUUID())이며 기기 키도 토큰도 아닙니다.
+    // 이 값만으로는 아무것도 열리지 않고, 서버가 요청마다 device_approvals 표에서 (로그인한 사용자,
+    // 이 번호)의 승인 여부를 새로 확인합니다. 로그인이 바뀌어도 같은 기기로 보이도록 localStorage에
+    // 둡니다(로그인 토큰은 기존처럼 sessionStorage). "앱으로 설치됨·standalone 실행"은 어디에서도
+    // 신뢰 신호로 쓰지 않습니다. 승인 여부는 서버만 정합니다.
+    const DEVICE_KEY = 'byteback.deviceId';
+    const DEVICE_ID = /^[A-Za-z0-9_-]{16,128}$/;
+    const deviceId = (() => {
+      try {
+        const kept = localStorage.getItem(DEVICE_KEY);
+        if (kept && DEVICE_ID.test(kept)) return kept;
+        const made = crypto.randomUUID();
+        localStorage.setItem(DEVICE_KEY, made);
+        return made;
+      } catch {
+        // 저장소를 못 쓰면 이 창에서만 쓰는 번호입니다(새로 열면 다시 승인이 필요합니다).
+        return crypto.randomUUID();
+      }
+    })();
+    const DEVICE_LABEL = { pending: '승인 대기 중', approved: '승인됨', revoked: '회수됨', unknown: '아직 요청하지 않음' };
 
     const saved = () => { try { return JSON.parse(sessionStorage.getItem(KEEP)); } catch { return null; } };
     const keep = value => {
@@ -83,12 +120,19 @@
       const response = await fetch(path, {
         ...options,
         cache: 'no-store',
-        headers: { Authorization: `Bearer ${session?.accessToken}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${session?.accessToken}`, 'Content-Type': 'application/json',
+          'X-Device-Id': deviceId },
       });
       if (response.status === 401) {
         if (retry && await refresh()) return api(path, options, false);
         show(null);
         throw new Error('로그인이 만료되었습니다. 다시 로그인해 주세요.');
+      }
+      if (response.status === 403) {
+        // 서버가 이 기기를 거부했습니다(승인 전이거나 회수됨). 화면에 있던 메모도 지웁니다.
+        // 여기서는 상태만 다시 읽고 메모를 다시 불러오지 않습니다(거부가 반복되는 고리를 막음).
+        lockVault(await deviceState().catch(() => 'unknown'));
+        throw new Error('이 기기는 승인되지 않아 자료를 열 수 없습니다.');
       }
       if (!response.ok) throw new Error('요청을 처리하지 못했습니다.');
       return response.json();
@@ -143,17 +187,47 @@
       $('cancel').hidden = true;
     }
 
+    function lockVault(state) {
+      $('app').hidden = true;
+      $('notes').replaceChildren();
+      resetEditor();
+      $('device').hidden = !session;
+      $('device-tail').textContent = deviceId.slice(-8);
+      $('device-state').textContent = DEVICE_LABEL[state] ?? DEVICE_LABEL.unknown;
+      // 요청 버튼은 아직 요청하지 않은 기기에만 보입니다(대기·회수 상태는 다시 요청해도 바뀌지 않음).
+      $('device-request').hidden = state !== 'unknown';
+    }
+
+    // 서버에 이 기기의 승인 상태를 물어보고, 승인된 경우에만 기존 메모 화면을 엽니다.
+    // 이 확인은 화면 편의일 뿐입니다. 메모 API가 요청마다 같은 확인을 서버에서 다시 합니다.
+    async function deviceState() {
+      const { status: state } = await api(`/api/devices/status?deviceId=${encodeURIComponent(deviceId)}`);
+      return state;
+    }
+
+    async function checkDevice() {
+      const state = await deviceState();
+      if (state === 'approved') {
+        $('device').hidden = true;
+        $('app').hidden = false;
+        await load();
+      } else {
+        lockVault(state);
+        status(state === 'pending' ? '승인을 기다리는 중입니다. 승인된 뒤 "다시 확인"을 눌러 주세요.' : '');
+      }
+    }
+
     function show(next) {
       session = next;
       keep(next);
       $('login').hidden = !!next;
-      $('app').hidden = !next;
+      $('app').hidden = true;
+      $('device').hidden = true;
+      $('notes').replaceChildren();
+      resetEditor();
       if (next) {
         $('who').textContent = next.email ?? '';
-        run(load);
-      } else {
-        $('notes').replaceChildren();
-        resetEditor();
+        run(checkDevice);
       }
     }
 
@@ -172,6 +246,14 @@
       show(null);
       if (token) await post('/api/auth/logout', {}, token).catch(() => {});
     }));
+    $('device-request').addEventListener('click', () => run(async () => {
+      // 본문에는 기기 번호만 보냅니다. 승인 상태는 서버가 언제나 pending으로 시작합니다.
+      const { status: state } = await api('/api/devices/request', { method: 'POST', body: JSON.stringify({ deviceId }) });
+      if (state === 'approved') await checkDevice();
+      else { lockVault(state); status('승인 요청을 보냈습니다. 승인된 뒤 "다시 확인"을 눌러 주세요.'); }
+    }));
+    $('device-check').addEventListener('click', () => run(checkDevice));
+    $('device-logout').addEventListener('click', () => $('logout').click());
     $('cancel').addEventListener('click', resetEditor);
     $('editor').addEventListener('submit', event => {
       event.preventDefault();

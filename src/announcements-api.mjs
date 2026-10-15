@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { createLoginVerifier } from './verify-login.mjs';
+import { assertDeviceStore, createDeviceApprovalStore, requireApprovedDevice } from './device-approval.mjs';
 
 // Announcements API. Parallel sibling of notes-api.mjs (kept separate on purpose; notes-api.mjs is untouched).
 //
@@ -41,7 +42,9 @@ function readBody(request) {
 }
 
 // verify(authorization) -> { userId } | null.  store holds all database access.
-export function createAnnouncementsApi({ verify, store }) {
+// devices: step 11 device approval store (required). Same gate and order as notes-api.mjs.
+export function createAnnouncementsApi({ verify, store, devices }) {
+  assertDeviceStore(devices);
   async function guard(request, response, allowed) {
     let user = null;
     try { user = await verify(request.headers?.authorization); } catch { user = null; }
@@ -51,6 +54,7 @@ export function createAnnouncementsApi({ verify, store }) {
       send(response, 405, { error: 'METHOD_NOT_ALLOWED' });
       return null;
     }
+    if (!(await requireApprovedDevice(devices, user, request, response))) return null;
     return user;
   }
 
@@ -135,5 +139,6 @@ export function createRuntimeAnnouncementsApi(config, env = process.env) {
   if (!url || !key) throw new Error('SERVER_NOT_CONFIGURED');
   const verify = createLoginVerifier({ config, supabaseSecretKey: key });
   const client = createClient(url, key, { auth: { persistSession: false } });
-  return createAnnouncementsApi({ verify, store: createSupabaseStore(client) });
+  return createAnnouncementsApi({ verify, store: createSupabaseStore(client),
+    devices: createDeviceApprovalStore(client) });
 }

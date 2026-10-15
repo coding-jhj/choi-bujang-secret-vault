@@ -6,7 +6,7 @@
 //   2. Signs each one in to get a real access token, then drives the deployed /api/* routes with
 //      plain fetch(), exactly as a logged-in browser would: create, cross-account read/write,
 //      tamper, restore, cross-account restore. 9 numbered checks, one line each.
-//   3. ALWAYS cleans up (try/finally, also on Ctrl+C): deletes every notes / notes_backup row
+//   3. ALWAYS cleans up (try/finally, also on Ctrl+C): deletes every notes / notes_backup / device_approvals row
 //      owned by the two throwaway users, then deletes both users. It NEVER deletes restore_audit
 //      rows: audit history is append-only for everyone, this script included. The retest's own
 //      audit row (one, from check 7) stays, holding only uuids (note, throwaway owner, backup row).
@@ -48,7 +48,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const FAKE_ID = '00000000-0000-4000-8000-000000000000';
 const DOMAIN = /^(?=.{3,120}$)[a-z0-9-]+(?:\.[a-z0-9-]+)+$/iu;
 // The only tables cleanup may delete from. restore_audit must never be added here.
-export const CLEANUP_TABLES = Object.freeze(['notes_backup', 'notes']);
+export const CLEANUP_TABLES = Object.freeze(['notes_backup', 'notes', 'device_approvals']);
 const CLIENT_OPTIONS = { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } };
 
 const short = value => {
@@ -103,9 +103,15 @@ export async function runRetest({ app, domain }, { admin, newAuthClient, fetchIm
   };
   const skip = (number, name, why) => record(number, name, false, `실행하지 못함 (${why})`);
 
+  // Step 11: data routes also need an approved device. Each throwaway user gets its own random
+  // device id, approved directly in device_approvals by the admin client at creation time (the
+  // same thing the student does by hand in the SQL Editor), and it is sent with that user's
+  // requests. Cross-account checks therefore still reach the owner check, as before step 11.
+  const deviceOf = new Map();
   async function call(path, { token, method = 'GET', body } = {}) {
     const headers = {};
     if (token) headers.Authorization = `Bearer ${token}`;
+    if (token && deviceOf.has(token)) headers['X-Device-Id'] = deviceOf.get(token);
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     const response = await fetchImpl(new URL(path, app), {
       method, headers, body: body === undefined ? undefined : JSON.stringify(body),
@@ -169,6 +175,11 @@ export async function runRetest({ app, domain }, { admin, newAuthClient, fetchIm
     if (signIn.error || typeof token !== 'string') {
       throw new Error(`임시 계정 ${label} 로그인 실패: ${short(signIn.error?.message ?? '토큰 없음')}`);
     }
+    const device = randomUUID();
+    const approval = await admin.from('device_approvals')
+      .insert({ owner_id: id, device_id: device, status: 'approved', approved_at: new Date().toISOString() });
+    if (approval.error) throw new Error(`임시 계정 ${label} 기기 승인 행 생성 실패: ${short(approval.error.message)}`);
+    deviceOf.set(token, device);
     return token;
   }
 

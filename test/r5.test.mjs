@@ -74,6 +74,10 @@ test('attack check reports the committed campaign-retest evidence, never a resul
     assert.ok(item.observed.startsWith('증거 확인됨'), item.attackId);
     assert.ok(item.observed.includes(`HTTP ${entry.status}`), item.attackId);
     assert.ok(item.observed.includes(entry.serverRequestId), item.attackId);
+    // A judge's third memo (2026-10-15, same day) pointed out this file's observed text never
+    // showed a verified timestamp, even though the judge explicitly asked for status + server id
+    // + checkedAt together.
+    assert.ok(item.observed.includes(entry.checkedAt), item.attackId);
     assert.equal(typeof item.expected, 'string');
     assert.ok(item.expected.length > 0);
   }

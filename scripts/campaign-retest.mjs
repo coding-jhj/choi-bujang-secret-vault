@@ -96,6 +96,10 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
     const entry = {
       id, result, status, observed: short(observed ?? ''),
       checkedAt: new Date().toISOString(), serverRequestId, expected: def?.expected ?? null,
+      // Stamped straight from the catalog (src/campaign-cases.mjs) so a reader can find this
+      // exact check by src/attack-check.mjs's own name (e.g. "no_login_list") directly in the
+      // committed file, without first having to decode attack-check.mjs's id mapping.
+      attackId: def?.attackId ?? null,
     };
     cases.push(entry);
     out(`${result === 'pass' ? '통과' : result === 'fail' ? '실패' : '실행 안 함'} · ${id} · ${def?.title ?? ''}`);
@@ -323,7 +327,8 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
       const noKey = !/sbp_|service_role|SUPABASE_SECRET_KEY|eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9/u.test(home.text);
       const dataJson404 = dataJson.status === 404;
       record('S05-04', noKey && dataJson404 ? 'pass' : 'fail',
-        { observed: `키 문자열 없음=${noKey}, /data.json 404=${dataJson404}`, serverRequestId: home.serverRequestId });
+        { status: home.status, observed: `HTTP ${home.status}, 키 문자열 없음=${noKey}, /data.json 404=${dataJson404}`,
+          serverRequestId: home.serverRequestId });
     } catch (error) { record('S05-04', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
 
     try {
@@ -688,7 +693,7 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
   for (const def of CAMPAIGN_CASES) {
     if (!touched.has(def.id)) cases.push({ id: def.id, result: 'not_run', status: null,
       observed: '이번 실행에서 다루지 않음', checkedAt: new Date().toISOString(),
-      serverRequestId: null, expected: def.expected });
+      serverRequestId: null, expected: def.expected, attackId: def.attackId ?? null });
   }
 
   const passed = cases.filter(item => item.result === 'pass').length;

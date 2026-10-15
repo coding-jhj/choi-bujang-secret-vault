@@ -136,15 +136,19 @@ export { sameDetect };
 // kind 'live'  = a real HTTP request to the deployed app (or its Supabase REST endpoint).
 // kind 'local' = a call to this checkout's decide()/detect(); the deployed app never calls them.
 // Order is execution order (later cases use notes and sessions made by earlier ones).
-const c = (id, step, kind, title, expected) => Object.freeze({ id, step, kind, title, expected });
+// attackId (optional 6th arg) is src/attack-check.mjs's own name for this exact same check -
+// stamped onto the stored result too (see scripts/campaign-retest.mjs's record()), so a reader
+// searching the committed evidence file for e.g. "no_login_list" finds it there directly, not
+// only by first decoding attack-check.mjs's id mapping.
+const c = (id, step, kind, title, expected, attackId = null) => Object.freeze({ id, step, kind, title, expected, attackId });
 export const CAMPAIGN_CASES = Object.freeze([
-  c('S02-01', 2, 'live', '옛 공개 자료 /data.json', '404'),
-  c('S02-02', 2, 'live', '배포 식별 파일 /aleph.json', '200 (정상)'),
-  c('S02-03', 2, 'live', '첫 화면 nosniff 헤더', 'X-Content-Type-Options: nosniff (정상)'),
-  c('S03-01', 3, 'live', '로그인 없이 메모 목록', '401 LOGIN_REQUIRED'),
-  c('S03-02', 3, 'live', '로그인 없이 메모 추가', '401 LOGIN_REQUIRED'),
-  c('S03-03', 3, 'live', '로그인 없이 메모 한 건 조회', '401 LOGIN_REQUIRED'),
-  c('S03-04', 3, 'live', '위조 토큰으로 메모 목록', '401 LOGIN_REQUIRED'),
+  c('S02-01', 2, 'live', '옛 공개 자료 /data.json', '404', 'public_data_json_read'),
+  c('S02-02', 2, 'live', '배포 식별 파일 /aleph.json', '200 (정상)', 'aleph_json_open'),
+  c('S02-03', 2, 'live', '첫 화면 nosniff 헤더', 'X-Content-Type-Options: nosniff (정상)', 'nosniff_header'),
+  c('S03-01', 3, 'live', '로그인 없이 메모 목록', '401 LOGIN_REQUIRED', 'no_login_list'),
+  c('S03-02', 3, 'live', '로그인 없이 메모 추가', '401 LOGIN_REQUIRED', 'no_login_create'),
+  c('S03-03', 3, 'live', '로그인 없이 메모 한 건 조회', '401 LOGIN_REQUIRED', 'no_login_item_read'),
+  c('S03-04', 3, 'live', '위조 토큰으로 메모 목록', '401 LOGIN_REQUIRED', 'forged_token_list'),
   c('S03-05', 3, 'live', "A'가 자기 메모 추가", '201 + id (정상)'),
   c('S03-06', 3, 'live', "A'가 자기 메모 한 건 조회", '200, 만든 내용 그대로 (정상)'),
   c('S03-07', 3, 'live', "A'가 자기 메모 수정", '200, 고친 내용 (정상)'),
@@ -153,11 +157,11 @@ export const CAMPAIGN_CASES = Object.freeze([
   c('S04-02', 4, 'live', "B'가 A'의 메모 수정", "404 NOT_FOUND, A' 메모 그대로"),
   c('S04-03', 4, 'live', "B'가 A'의 메모 삭제", "404 NOT_FOUND, A' 메모 남아 있음"),
   c('S04-04', 4, 'live', "B'의 목록에 A'의 메모가 없음", "200, A' 메모 id 없음"),
-  c('S05-01', 5, 'live', '키 없이 원본 DB 직접 조회', '401/403'),
-  c('S05-02', 5, 'live', '키 없이 원본 DB 직접 추가', '401/403'),
+  c('S05-01', 5, 'live', '키 없이 원본 DB 직접 조회', '401/403', 'original_api_no_key_read'),
+  c('S05-02', 5, 'live', '키 없이 원본 DB 직접 추가', '401/403', 'original_api_no_key_write'),
   c('S05-03', 5, 'live', "A'의 로그인 토큰만으로 원본 DB 직접 조회 (공개 키 없음)", '401/403'),
-  c('S05-04', 5, 'live', '첫 화면·옛 키 파일에 Supabase 키 문자열 없음', '키 문자열 없음, 옛 파일 404'),
-  c('S05-05', 5, 'live', '틀린 로그인 정보로 서버 로그인', '401 LOGIN_FAILED'),
+  c('S05-04', 5, 'live', '첫 화면·옛 키 파일에 Supabase 키 문자열 없음', '키 문자열 없음, 옛 파일 404', 'public_files_no_key'),
+  c('S05-05', 5, 'live', '틀린 로그인 정보로 서버 로그인', '401 LOGIN_FAILED', 'login_bad_credentials'),
   c('S05-06', 5, 'live', "C'가 서버 로그인 경로로 로그인", '200, 본문은 email·expiresAt뿐, httpOnly 쿠키 2개 (정상)'),
   c('S06-01', 6, 'local', 'decide(): 등록 기기 정상 요청', 'allow / device_registered'),
   c('S06-02', 6, 'local', 'decide(): 미등록 기기 가상 요청', 'deny / device_not_registered'),
@@ -166,9 +170,9 @@ export const CAMPAIGN_CASES = Object.freeze([
   c('S08-01', 8, 'live', "A'가 자기 공지 추가", '201 + id (정상)'),
   c('S08-02', 8, 'live', "B'가 A'의 공지 조회", '404 NOT_FOUND'),
   c('S08-03', 8, 'live', "B'가 A'의 공지 수정", "404 NOT_FOUND, A' 공지 그대로"),
-  c('S08-04', 8, 'live', '로그인 없이 공지 목록', '401 LOGIN_REQUIRED'),
-  c('S08-05', 8, 'live', '로그인 없이 공지 추가', '401 LOGIN_REQUIRED'),
-  c('S08-10', 8, 'live', '로그인 없이 공지 한 건 수정', '401 LOGIN_REQUIRED'),
+  c('S08-04', 8, 'live', '로그인 없이 공지 목록', '401 LOGIN_REQUIRED', 'no_login_announcements_list'),
+  c('S08-05', 8, 'live', '로그인 없이 공지 추가', '401 LOGIN_REQUIRED', 'no_login_announcements_create'),
+  c('S08-10', 8, 'live', '로그인 없이 공지 한 건 수정', '401 LOGIN_REQUIRED', 'no_login_announcement_write'),
   c('S08-06', 8, 'local', 'decide(): 공지 쓰기', 'deny / announcement_write_denied'),
   c('S08-07', 8, 'local', 'decide(): 메모 전체 목록', 'deny / notes_list_denied'),
   c('S08-08', 8, 'local', 'decide(): 메모 경로 모양으로 다른 구역 path', 'deny / zone_mismatch'),
@@ -176,13 +180,13 @@ export const CAMPAIGN_CASES = Object.freeze([
   c('S09-01', 9, 'local', 'detect(): 정상 조회 30건', 'observe'),
   c('S09-02', 9, 'local', 'detect(): 10분 안에 정확히 120건', 'observe'),
   c('S09-03', 9, 'local', 'detect(): 10분 안에 121건', 'propose_revocation / burst_read'),
-  c('S10-01', 10, 'live', '로그인 없이 메모 복구', '401 LOGIN_REQUIRED'),
+  c('S10-01', 10, 'live', '로그인 없이 메모 복구', '401 LOGIN_REQUIRED', 'no_login_restore'),
   c('S10-02', 10, 'live', "B'가 변조된 자기 메모를 복구", '200, 원본으로 돌아옴, 3값 대조 true, audit recorded (정상)'),
   c('S10-03', 10, 'live', "A'가 B'의 메모를 복구", '404 NOT_FOUND, 대조값(backupId·backupSha256·idMatch·ownerMatch·hashMatch·persistedSha256)은 전부 null, rolledBack=false, audit=not_written'),
   c('S10-04', 10, 'live', "B'의 모든 시도 뒤 A'의 메모", '200, 원래 내용 그대로 (정상)'),
-  c('S11-01', 11, 'live', '로그인 없이 본문에 approved를 넣은 승인 요청', '401 LOGIN_REQUIRED'),
-  c('S11-02', 11, 'live', '위조 토큰 + 본문 approved 승인 요청', '401 LOGIN_REQUIRED'),
-  c('S11-03', 11, 'live', '로그인 없이 승인 상태 조회', '401 LOGIN_REQUIRED'),
+  c('S11-01', 11, 'live', '로그인 없이 본문에 approved를 넣은 승인 요청', '401 LOGIN_REQUIRED', 'no_login_device_request'),
+  c('S11-02', 11, 'live', '위조 토큰 + 본문 approved 승인 요청', '401 LOGIN_REQUIRED', 'forged_token_device_request'),
+  c('S11-03', 11, 'live', '로그인 없이 승인 상태 조회', '401 LOGIN_REQUIRED', 'no_login_device_status'),
   c('S11-04', 11, 'live', "C'의 승인 전 세션으로 메모 목록", '403 DEVICE_NOT_APPROVED'),
   c('S11-05', 11, 'live', "C'가 본문에 approved를 넣어 승인 요청 뒤 메모 목록", '승인 요청 200 pending, 메모 403'),
   c('S11-06', 11, 'live', "관리자가 C'의 세션을 승인한 뒤 메모 목록", '200 (정상)'),
@@ -225,7 +229,8 @@ export function mergeCampaign(stored, catalog = CAMPAIGN_CASES) {
     }
   }
   const cases = catalog.map(def => {
-    const base = { id: def.id, step: def.step, kind: def.kind, title: def.title, expected: def.expected,
+    const base = { id: def.id, attackId: def.attackId ?? null, step: def.step, kind: def.kind,
+      title: def.title, expected: def.expected,
       state: 'not_run', status: null, observed: null, serverRequestId: null, checkedAt: null };
     const item = byId.get(def.id);
     if (!item) return base;

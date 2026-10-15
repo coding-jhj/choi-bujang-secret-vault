@@ -200,7 +200,14 @@ test('12단계 재시험 실행기: 전체 CAMPAIGN_CASES를 모두 다루고, �
     if (def.kind === 'live' && item.result === 'pass') {
       assert.ok(typeof item.serverRequestId === 'string' && item.serverRequestId.length > 0, item.id);
     }
+    // record() must stamp the catalog's attackId straight onto the stored entry - so a reader
+    // can find e.g. "no_login_list" directly in ops/campaign-retest-results.json, not only by
+    // first decoding src/attack-check.mjs's id mapping (a judge's fourth memo, 2026-10-15, named
+    // exactly this gap).
+    assert.equal(item.attackId, def.attackId ?? null, item.id);
   }
+  const mapped = result.cases.filter(c => c.attackId);
+  assert.equal(mapped.length, 18, 'exactly the 18 attack-check.mjs-mapped cases carry an attackId');
 });
 
 test('12단계 재시험 실행기: 계정 준비가 실패하면 그 계정이 필요한 건들은 not_run이지 pass가 아니다', async () => {

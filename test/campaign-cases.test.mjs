@@ -25,6 +25,20 @@ test('12단계 카탈로그: 58건(배포 대상 45 + 로컬 13), id는 겹치�
   assert.ok(CAMPAIGN_CASES.every(c => /^S\d{2}-\d{2}$/u.test(c.id) && Number(c.id.slice(1, 3)) === c.step));
 });
 
+test('12단계 카탈로그: 18개 live 항목만 attackId를 갖고, src/attack-check.mjs와 1:1 대응한다', () => {
+  const withAttackId = CAMPAIGN_CASES.filter(c => c.attackId);
+  assert.equal(withAttackId.length, 18);
+  assert.ok(withAttackId.every(c => c.kind === 'live'));
+  assert.equal(new Set(withAttackId.map(c => c.attackId)).size, 18);
+});
+
+test('12단계 병합: attackId가 있는 카탈로그 항목은 병합 결과에도 그대로 나온다', () => {
+  assert.equal(first.attackId, 'public_data_json_read');
+  const merged = mergeCampaign(stored([item()]));
+  assert.equal(merged.cases.find(c => c.id === first.id).attackId, 'public_data_json_read');
+  assert.equal(merged.cases.find(c => c.id === firstLocal.id).attackId, null);
+});
+
 test('12단계 병합: 저장된 결과가 없거나 실행 표시가 없으면 전부 not_run', () => {
   for (const input of [null, undefined, {}, { schema: RESULTS_SCHEMA, ran: false, cases: [item()] },
     { schema: 'other', ran: true, cases: [item()] }, { schema: RESULTS_SCHEMA, ran: true, cases: 'x' }]) {

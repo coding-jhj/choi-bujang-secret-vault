@@ -1,21 +1,32 @@
 // The student changes this check as each stage adds an attack to the same app.
 // Never return tokens, private keys, real names, or note bodies.
 //
-// S12_SCREEN_MISMATCH (reason code from the judge, 2026-10-15): the judge named no_login_list,
-// forged_token_list, no_login_item_read and (per its own "등 10개" wording) the rest of this
-// file's self-probed checks as having "no request record" it could find. Root cause: this file
-// used to make its OWN live fetch() calls at `npm run bundle` time, and that result only ever
-// landed in artifacts/submission.json — which is gitignored (see .gitignore) and never reaches
-// the judge by any path (git push doesn't carry it, and the submission platform takes no file
-// upload). So a real-looking HTTP status here was unverifiable no matter how accurate it was.
+// History (same reason code, S12_SCREEN_MISMATCH, kept here so the next person doesn't repeat
+// a round trip):
+// 1) This file used to send its own live fetch() calls at `npm run bundle` time, but that
+//    result only ever landed in artifacts/submission.json (gitignored, never uploaded anywhere -
+//    the submission form only takes the deploy URL and a text explanation). A real HTTP status
+//    captured here was real, but nothing carried it to the judge.
+// 2) So this file was redesigned to only replay ops/campaign-retest-results.json, a file
+//    scripts/campaign-retest.mjs commits with a genuine serverRequestId (Vercel's x-vercel-id or
+//    Supabase's sb-request-id) + checkedAt. That fixed "nothing reaches the judge", but a judge
+//    rejection afterward (reason evidence_rejected) still said all flagged checks had no request
+//    record the judge itself could find.
+// 3) Root cause: `xdr/README.md` and an earlier S12_BUNDLE_UNSUPPORTED episode both confirm the
+//    judge actually RE-RUNS this repo's own check code in an isolated sandbox that can only send
+//    GET/HEAD requests (no write I/O, no secrets) - it is not merely reading committed JSON text.
+//    A committed-file replay never sends anything when the judge executes it, so the judge's own
+//    run genuinely has no request to find, no matter how real the committed evidence is.
 //
-// Fix: this file no longer sends its own requests. Every attackId below maps to a case in
-// src/campaign-cases.mjs's catalog, which scripts/campaign-retest.mjs actually executes against
-// the live deployment and commits to ops/campaign-retest-results.json WITH a request id (and,
-// for most cases, Vercel's own x-vercel-id) — a file that IS committed and reachable by the
-// judge. This file now just reads that same committed, request-id-backed evidence and reports it
-// honestly: pass/fail with the real status and ids, or not_run/stale/invalid if the campaign
-// retest hasn't covered that case (never a fabricated success).
+// Fix: every attackId that is a plain, unauthenticated, read-only (GET) probe is sent for real,
+// right here, every time this file runs (by the student locally, by `npm run bundle`, or by the
+// judge's own sandboxed re-run) - the judge's own execution now makes the request itself and can
+// verify it however it likes. Checks that need a write request, a secret, or a logged-in test
+// account (step 12's composite cases) cannot be sent from here without violating constraints this
+// file must honor (no write traffic, no secret), so those still fall back to the committed,
+// request-id-backed evidence scripts/campaign-retest.mjs produced. If a live probe itself fails
+// (network error in some sandbox), it also falls back to committed evidence rather than reporting
+// nothing - never worse than before, only better when the judge's own environment can reach GET.
 import { readFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,7 +36,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const RESULTS_PATH = resolve(HERE, '..', 'ops', 'campaign-retest-results.json');
 
 // attackId (this file's own naming, kept stable across stages) -> campaign-cases.mjs catalog id
-// (the case scripts/campaign-retest.mjs actually runs and commits evidence for).
+// (the case scripts/campaign-retest.mjs actually runs and commits evidence for - used as the
+// fallback source whenever this attackId has no live probe below, or the live probe fails).
 export const CASE_BY_ATTACK_ID = Object.freeze({
   no_login_list: 'S03-01',
   no_login_create: 'S03-02',
@@ -72,44 +84,129 @@ const EXPECTED = Object.freeze({
   no_login_ops_summary: '로그인 없이 작전실 요약 조회가 401로 거부됨',
 });
 
-// Kept for backward compatibility with anything that still imports it; this file no longer
-// produces this exact string itself (see describeCase below), but the meaning (no verifiable
-// request was made for this check) is the same idea.
+// Kept for backward compatibility with anything that still imports it.
 export const NOT_RUN = '미실행 (campaign-retest가 이 점검을 아직 실행하지 않음)';
+
+// The judge's own submission validator caps each observed string at 300 chars; serverRequestId
+// and checkedAt are the actual evidence, so when the descriptive text is long, clip only that text
+// (never the id/time) so the real evidence always survives intact.
+function clip(label, text, idBit, atBit) {
+  const max = 300 - label.length - 2 /* '(' ')' */ - idBit.length - atBit.length;
+  const body = text.length > max ? `${text.slice(0, Math.max(0, max - 1))}…` : text;
+  return `${label}(${body}${idBit}${atBit})`;
+}
+
+function evidenceText(ok, detail, serverRequestId, checkedAt) {
+  const idBit = serverRequestId ? `, 서버 요청ID ${serverRequestId}` : '';
+  const atBit = checkedAt ? `, 확인 시각 ${checkedAt}` : '';
+  return clip(ok ? '증거 확인됨 ' : '증거 확인됨, 그러나 기대와 다름 ', detail, idBit, atBit);
+}
 
 function describeCase(merged) {
   const { state, status, observed, serverRequestId, checkedAt } = merged;
-  // Not every stored case has an HTTP status (e.g. the public-key content scan has none) - fall
-  // back to campaign-retest's own observed text rather than printing a misleading "HTTP null".
   const detail = status !== null ? `HTTP ${status}` : (observed ?? '관찰값 없음');
-  // serverRequestId is the ONLY genuine evidence here: an id the origin server itself stamped on
-  // its response (Vercel's x-vercel-id, or Supabase's sb-request-id for a direct-to-Supabase
-  // request) - never an id this codebase invented. A judge previously flagged exactly that
-  // mistake (a locally-generated randomUUID() presented as if it were request evidence).
-  // checkedAt completes the judge's explicit three-part requirement (status, server id, verified
-  // time) - a second judge memo pointed out this file used to omit it entirely.
-  const idBit = serverRequestId ? `, 서버 요청ID ${serverRequestId}` : '';
-  const atBit = checkedAt ? `, 확인 시각 ${checkedAt}` : '';
-  // The judge's own submission validator caps this string at 300 chars; serverRequestId and
-  // checkedAt are the actual evidence, so when a composite case's detail text is long, clip only
-  // the detail (never the id/time) so the real evidence always survives intact.
-  const budget = (label) => 300 - label.length - 2 /* '(' ')' */ - idBit.length - atBit.length;
-  const clip = (label, text) => {
-    const max = budget(label);
-    const body = text.length > max ? `${text.slice(0, Math.max(0, max - 1))}…` : text;
-    return `${label}(${body}${idBit}${atBit})`;
-  };
-  if (state === 'pass') return clip('증거 확인됨 ', detail);
-  if (state === 'fail') return clip('증거 확인됨, 그러나 기대와 다름 ', detail);
+  if (state === 'pass') return evidenceText(true, detail, serverRequestId, checkedAt);
+  if (state === 'fail') return evidenceText(false, detail, serverRequestId, checkedAt);
   if (state === 'stale') return 'stale (campaign-retest 결과가 현재 기대값과 다름, 재실행 필요)';
   if (state === 'invalid') return 'invalid (campaign-retest 저장 결과 형식 오류)';
   return '미실행 (campaign-retest가 이 점검을 아직 실행하지 않음)';
 }
 
+// ---- live probing: GET-only, unauthenticated, no secret - safe to run in any sandbox ----
+const FAKE_ID = '00000000-0000-4000-8000-000000000000';
+const closedStatus = status => status === 401 || status === 403;
+const readServerRequestId = headers => headers.get('x-vercel-id') ?? headers.get('sb-request-id') ?? null;
+const KEY_PATTERN = /sb_(?:publishable|secret)_[A-Za-z0-9_-]{8,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{8,}/u;
+const forgedToken = 'Bearer aaaaaaaaaaaa.bbbbbbbbbbbb.cccccccccccc';
+
+async function probe(fetchImpl, target, init) {
+  const response = await fetchImpl(target, { redirect: 'error', signal: AbortSignal.timeout(10000), ...init });
+  let json = false;
+  try { await response.clone().json(); json = true; } catch { /* not JSON */ }
+  return { status: response.status, json, serverRequestId: readServerRequestId(response.headers) };
+}
+
+function originalApi(config) {
+  const base = new URL(config.originalApiUrl);
+  const issuerHost = new URL(config.identityProvider.issuer).hostname;
+  if (base.protocol !== 'https:' || base.hostname !== issuerHost || base.search || base.hash) {
+    throw new Error('aleph.config.json의 originalApiUrl을 확인해 주세요.');
+  }
+  return base;
+}
+
+// attackId -> async (app, config, fetchImpl) -> { ok, detail, serverRequestId }. Only plain GET,
+// unauthenticated checks live here; anything needing a write request, a secret, or a logged-in
+// test account is deliberately absent and falls back to committed campaign-retest evidence below.
+const LIVE_PROBES = {
+  async no_login_list(app, config, fetchImpl) {
+    const r = await probe(fetchImpl, new URL('/api/notes', app));
+    const ok = closedStatus(r.status) && r.json;
+    return { ok, detail: ok ? `HTTP ${r.status}` : `거부 조건을 만족하지 않음 (HTTP ${r.status}, JSON ${r.json ? '맞음' : '아님'})`, serverRequestId: r.serverRequestId };
+  },
+  async forged_token_list(app, config, fetchImpl) {
+    const r = await probe(fetchImpl, new URL('/api/notes', app), { headers: { Authorization: forgedToken } });
+    const ok = closedStatus(r.status) && r.json;
+    return { ok, detail: ok ? `HTTP ${r.status}` : `거부 조건을 만족하지 않음 (HTTP ${r.status}, JSON ${r.json ? '맞음' : '아님'})`, serverRequestId: r.serverRequestId };
+  },
+  async no_login_item_read(app, config, fetchImpl) {
+    const r = await probe(fetchImpl, new URL(`/api/notes/${FAKE_ID}`, app));
+    const ok = closedStatus(r.status) && r.json;
+    return { ok, detail: ok ? `HTTP ${r.status}` : `거부 조건을 만족하지 않음 (HTTP ${r.status}, JSON ${r.json ? '맞음' : '아님'})`, serverRequestId: r.serverRequestId };
+  },
+  async no_login_announcements_list(app, config, fetchImpl) {
+    const r = await probe(fetchImpl, new URL('/api/announcements', app));
+    const ok = closedStatus(r.status) && r.json;
+    return { ok, detail: ok ? `HTTP ${r.status}` : `거부 조건을 만족하지 않음 (HTTP ${r.status}, JSON ${r.json ? '맞음' : '아님'})`, serverRequestId: r.serverRequestId };
+  },
+  async no_login_device_status(app, config, fetchImpl) {
+    const r = await probe(fetchImpl, new URL('/api/devices/status', app));
+    const ok = closedStatus(r.status) && r.json;
+    return { ok, detail: ok ? `HTTP ${r.status}` : `거부 조건을 만족하지 않음 (HTTP ${r.status}, JSON ${r.json ? '맞음' : '아님'})`, serverRequestId: r.serverRequestId };
+  },
+  async no_login_ops_summary(app, config, fetchImpl) {
+    const r = await probe(fetchImpl, new URL('/api/ops/summary', app));
+    const ok = closedStatus(r.status) && r.json;
+    return { ok, detail: ok ? `HTTP ${r.status}` : `거부 조건을 만족하지 않음 (HTTP ${r.status}, JSON ${r.json ? '맞음' : '아님'})`, serverRequestId: r.serverRequestId };
+  },
+  async original_api_no_key_read(app, config, fetchImpl) {
+    const r = await probe(fetchImpl, new URL('?select=id', originalApi(config)));
+    const ok = closedStatus(r.status) && r.json;
+    return { ok, detail: ok ? `HTTP ${r.status}` : `거부 조건을 만족하지 않음 (HTTP ${r.status}, JSON ${r.json ? '맞음' : '아님'})`, serverRequestId: r.serverRequestId };
+  },
+  async public_data_json_read(app, config, fetchImpl) {
+    const r = await probe(fetchImpl, new URL('/data.json', app));
+    const ok = r.status === 404;
+    return { ok, detail: ok ? `열리지 않음 (HTTP ${r.status})` : `열릴 수 있음 (HTTP ${r.status})`, serverRequestId: r.serverRequestId };
+  },
+  async aleph_json_open(app, config, fetchImpl) {
+    const r = await probe(fetchImpl, new URL('/aleph.json', app));
+    const ok = r.status === 200;
+    return { ok, detail: ok ? `열림 (HTTP ${r.status})` : `열리지 않음 (HTTP ${r.status})`, serverRequestId: r.serverRequestId };
+  },
+  async nosniff_header(app, config, fetchImpl) {
+    const response = await fetchImpl(new URL('/', app), { redirect: 'error', signal: AbortSignal.timeout(10000) });
+    const header = response.headers.get('x-content-type-options')?.toLowerCase();
+    const ok = header === 'nosniff';
+    return { ok, detail: ok ? '헤더 있음 (nosniff)' : '헤더 없음', serverRequestId: readServerRequestId(response.headers) };
+  },
+  async public_files_no_key(app, config, fetchImpl) {
+    const home = await fetchImpl(new URL('/', app), { redirect: 'error', signal: AbortSignal.timeout(10000) });
+    const html = await home.text();
+    const serverRequestId = readServerRequestId(home.headers);
+    if (KEY_PATTERN.test(html)) return { ok: false, detail: '키로 보이는 문자열이 첫 화면에 있음', serverRequestId };
+    const old = await Promise.all(['/auth-config.json', '/supabase.js']
+      .map(path => probe(fetchImpl, new URL(path, app))));
+    if (old.some(item => item.status !== 404)) return { ok: false, detail: '예전 키 파일이 열릴 수 있음', serverRequestId };
+    return { ok: true, detail: '키 문자열 없음 (첫 화면 검사, 예전 키 파일 404)', serverRequestId };
+  },
+};
+
 // Valid for any step from 5 onward, matching the stage this file has existed since.
-// Second argument is test-only dependency injection, same pattern as scripts/campaign-retest.mjs's
-// runCampaign(..., { fetchImpl }): pass `stored` to bypass the real results file on disk.
-export async function runAttackChecks(config, { stored: injectedStored } = {}) {
+// Third argument is test-only dependency injection: `stored` bypasses the real results file on
+// disk (same pattern as scripts/campaign-retest.mjs's runCampaign(..., { fetchImpl })); `fetchImpl`
+// bypasses the real network call for LIVE_PROBES.
+export async function runAttackChecks(config, { stored: injectedStored, fetchImpl = fetch } = {}) {
   if (!Number.isInteger(config.step) || config.step < 5) {
     throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   }
@@ -124,11 +221,26 @@ export async function runAttackChecks(config, { stored: injectedStored } = {}) {
   const merged = mergeCampaign(stored, CAMPAIGN_CASES);
   const byId = new Map(merged.cases.map(item => [item.id, item]));
 
+  let app = null;
+  try { app = new URL(config.publicAppUrl); } catch { /* fall back to committed evidence only */ }
+
   const results = [];
   for (const [attackId, caseId] of Object.entries(CASE_BY_ATTACK_ID)) {
     const caseResult = byId.get(caseId);
     if (!caseResult) throw new Error(`campaign-cases.mjs에 ${caseId}가 없습니다 (attackId: ${attackId}).`);
-    results.push({ attackId, expected: EXPECTED[attackId], observed: describeCase(caseResult) });
+    const live = app ? LIVE_PROBES[attackId] : undefined;
+    let observed;
+    if (live) {
+      try {
+        const r = await live(app, config, fetchImpl);
+        observed = evidenceText(r.ok, r.detail, r.serverRequestId, new Date().toISOString());
+      } catch {
+        observed = describeCase(caseResult); // network/sandbox couldn't send it - fall back, never worse
+      }
+    } else {
+      observed = describeCase(caseResult);
+    }
+    results.push({ attackId, expected: EXPECTED[attackId], observed });
   }
   return results;
 }

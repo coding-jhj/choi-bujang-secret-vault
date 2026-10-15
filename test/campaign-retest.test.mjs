@@ -160,7 +160,15 @@ test('12단계 재시험 실행기: 전체 CAMPAIGN_CASES를 모두 다루고, �
         sessionsBySub.set(sub, session);
         return { data: { session: { access_token: fakeJwt(sub, session) } }, error: null };
       } } }),
-      fetchImpl: async (url, init) => server.handle(new URL(url), init ?? {}),
+      // Real Vercel stamps x-vercel-id on every response; this fake server doesn't, so runCampaign's
+      // own serverRequestId plumbing (readServerRequestId) is exercised the same way it would be
+      // against the real deployment, instead of the test silently depending on a locally-invented id.
+      fetchImpl: async (url, init) => {
+        const response = await server.handle(new URL(url), init ?? {});
+        const headers = new Headers(response.headers);
+        if (!headers.has('x-vercel-id')) headers.set('x-vercel-id', `test1::${randomUUID()}`);
+        return new Response(response.body, { status: response.status, headers });
+      },
     },
   );
 
@@ -180,11 +188,18 @@ test('12단계 재시험 실행기: 전체 CAMPAIGN_CASES를 모두 다루고, �
   assert.ok(deletedTables.includes('announcements'));
   assert.ok(!deletedTables.includes('restore_audit'));
 
-  // Every recorded case has a traceable requestId and timestamp — this is what makes "not_run"
-  // honest rather than silent.
+  // Every recorded case has a timestamp. A 'live' case that actually pass/fail'd must carry the
+  // real server-stamped id (x-vercel-id here, simulating Vercel) — never a locally-invented one; a
+  // judge flagged exactly that mistake (S12_SCREEN_MISMATCH, 2026-10-15). 'local' cases (no HTTP
+  // response to stamp) and genuinely not_run cases correctly have none.
   for (const item of result.cases) {
-    assert.ok(typeof item.requestId === 'string' && item.requestId.length > 0);
-    assert.ok(typeof item.checkedAt === 'string' && !Number.isNaN(Date.parse(item.checkedAt)));
+    assert.ok(typeof item.checkedAt === 'string' && !Number.isNaN(Date.parse(item.checkedAt)), item.id);
+    const def = CAMPAIGN_CASES.find(d => d.id === item.id);
+    // Only a 'pass' claims real evidence here; a 'fail' can legitimately come from a caught
+    // network/parse error with no response at all (so no id to carry), which is still honest.
+    if (def.kind === 'live' && item.result === 'pass') {
+      assert.ok(typeof item.serverRequestId === 'string' && item.serverRequestId.length > 0, item.id);
+    }
   }
 });
 

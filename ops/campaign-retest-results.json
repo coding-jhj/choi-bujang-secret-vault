@@ -1,12 +1,12 @@
 {
   "schema": "byteback.campaign-retest.v1",
   "ran": true,
-  "ranAt": "2026-10-15T12:07:55.951Z",
-  "finishedAt": "2026-10-15T12:09:11.168Z",
+  "ranAt": "2026-10-15T12:44:54.118Z",
+  "finishedAt": "2026-10-15T12:46:03.984Z",
   "target": {
     "appOrigin": "https://choi-bujang-secret-vault-omega.vercel.app",
-    "deployedCommit": "d190e98aa891764c41a4ab3be4c4d8347bca8577",
-    "localCommit": "d190e98aa891764c41a4ab3be4c4d8347bca8577",
+    "deployedCommit": "508c377f4a3408c9d0ff3e6f684cf6faf0faf3ef",
+    "localCommit": "508c377f4a3408c9d0ff3e6f684cf6faf0faf3ef",
     "localDirty": true
   },
   "cleanupOk": true,
@@ -16,9 +16,8 @@
       "result": "pass",
       "status": null,
       "observed": "decision=allow reasonCode=device_registered",
-      "requestId": "3b992d8a-70a4-4fa2-836a-36829529745e",
-      "checkedAt": "2026-10-15T12:07:55.953Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:44:54.120Z",
+      "serverRequestId": null,
       "expected": "allow / device_registered"
     },
     {
@@ -26,9 +25,8 @@
       "result": "pass",
       "status": null,
       "observed": "decision=deny reasonCode=device_not_registered",
-      "requestId": "ce959941-1ac5-42c9-acec-d734456b75f3",
-      "checkedAt": "2026-10-15T12:07:55.953Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:44:54.120Z",
+      "serverRequestId": null,
       "expected": "deny / device_not_registered"
     },
     {
@@ -36,9 +34,8 @@
       "result": "pass",
       "status": null,
       "observed": "decision=step_up reasonCode=step_up_required",
-      "requestId": "3df64df3-d7bd-4bef-8a4c-fa44e49d8950",
-      "checkedAt": "2026-10-15T12:07:55.953Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:44:54.120Z",
+      "serverRequestId": null,
       "expected": "step_up / step_up_required"
     },
     {
@@ -46,9 +43,8 @@
       "result": "pass",
       "status": null,
       "observed": "decision=allow reasonCode=step_up_verified",
-      "requestId": "936301bb-50cb-46aa-8e73-b6c09a848620",
-      "checkedAt": "2026-10-15T12:07:55.953Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:44:54.121Z",
+      "serverRequestId": null,
       "expected": "allow / step_up_verified"
     },
     {
@@ -56,9 +52,8 @@
       "result": "pass",
       "status": null,
       "observed": "decision=deny reasonCode=announcement_write_denied",
-      "requestId": "54df2289-1ad4-4bf7-a1eb-dc17b872cb8e",
-      "checkedAt": "2026-10-15T12:07:55.953Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:44:54.121Z",
+      "serverRequestId": null,
       "expected": "deny / announcement_write_denied"
     },
     {
@@ -66,9 +61,8 @@
       "result": "pass",
       "status": null,
       "observed": "decision=deny reasonCode=notes_list_denied",
-      "requestId": "2e31152a-d89b-4c6b-95f5-61befdaec574",
-      "checkedAt": "2026-10-15T12:07:55.953Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:44:54.121Z",
+      "serverRequestId": null,
       "expected": "deny / notes_list_denied"
     },
     {
@@ -76,9 +70,8 @@
       "result": "pass",
       "status": null,
       "observed": "decision=deny reasonCode=zone_mismatch",
-      "requestId": "7555e220-b059-4bef-a681-135e7f0871d7",
-      "checkedAt": "2026-10-15T12:07:55.953Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:44:54.121Z",
+      "serverRequestId": null,
       "expected": "deny / zone_mismatch"
     },
     {
@@ -86,9 +79,8 @@
       "result": "pass",
       "status": null,
       "observed": "decision=deny reasonCode=unknown_route",
-      "requestId": "fc2e19a4-128c-40ce-bde2-83652289597b",
-      "checkedAt": "2026-10-15T12:07:55.953Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:44:54.121Z",
+      "serverRequestId": null,
       "expected": "deny / unknown_route"
     },
     {
@@ -96,9 +88,8 @@
       "result": "pass",
       "status": null,
       "observed": "decision=deny reasonCode=device_not_registered",
-      "requestId": "f0d76c3e-6e59-48cf-af77-06834b5d84da",
-      "checkedAt": "2026-10-15T12:07:55.954Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:44:54.121Z",
+      "serverRequestId": null,
       "expected": "deny / device_not_registered"
     },
     {
@@ -106,9 +97,8 @@
       "result": "pass",
       "status": null,
       "observed": "decision=deny reasonCode=announcement_write_denied",
-      "requestId": "a959ec9d-75a3-4f23-9f3c-eb6e0ac41791",
-      "checkedAt": "2026-10-15T12:07:55.954Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:44:54.121Z",
+      "serverRequestId": null,
       "expected": "deny / announcement_write_denied"
     },
     {
@@ -116,9 +106,8 @@
       "result": "pass",
       "status": null,
       "observed": "{\"action\":\"observe\"}",
-      "requestId": "3ec0dbc8-0def-4fd3-95a1-4ca9c42d59e0",
-      "checkedAt": "2026-10-15T12:07:55.954Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:44:54.121Z",
+      "serverRequestId": null,
       "expected": "observe"
     },
     {
@@ -126,9 +115,8 @@
       "result": "pass",
       "status": null,
       "observed": "{\"action\":\"observe\"}",
-      "requestId": "88a8ed65-39f7-4266-a94b-f62e5c91686a",
-      "checkedAt": "2026-10-15T12:07:55.954Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:44:54.121Z",
+      "serverRequestId": null,
       "expected": "observe"
     },
     {
@@ -136,9 +124,8 @@
       "result": "pass",
       "status": null,
       "observed": "{\"action\":\"propose_revocation\",\"reasonCode\":\"burst_read\",\"subject\":\"learner_fixture\"}",
-      "requestId": "3271868c-b4cd-4176-8875-b2994eca4679",
-      "checkedAt": "2026-10-15T12:07:55.954Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:44:54.122Z",
+      "serverRequestId": null,
       "expected": "propose_revocation / burst_read"
     },
     {
@@ -146,9 +133,8 @@
       "result": "pass",
       "status": 404,
       "observed": "HTTP 404",
-      "requestId": "941a2ef8-6313-4804-b44d-fc52c1fd19d6",
-      "checkedAt": "2026-10-15T12:07:56.043Z",
-      "vercelId": "icn1::hz6cw-1792066076408-fd1b45b6a056",
+      "checkedAt": "2026-10-15T12:44:54.446Z",
+      "serverRequestId": "icn1::mvhn2-1792068294626-f2b1db4d6469",
       "expected": "404"
     },
     {
@@ -156,9 +142,8 @@
       "result": "pass",
       "status": 200,
       "observed": "HTTP 200",
-      "requestId": "74290e84-7aee-4eb6-861e-556697d200fe",
-      "checkedAt": "2026-10-15T12:07:56.093Z",
-      "vercelId": "icn1::wppjx-1792066076461-3c690c3833cd",
+      "checkedAt": "2026-10-15T12:44:54.699Z",
+      "serverRequestId": "icn1::7fzk9-1792068294917-8073d0efa5c1",
       "expected": "200 (정상)"
     },
     {
@@ -166,9 +151,8 @@
       "result": "pass",
       "status": 200,
       "observed": "x-content-type-options=nosniff",
-      "requestId": "75314962-f714-48b3-9836-df7d4c044989",
-      "checkedAt": "2026-10-15T12:07:56.378Z",
-      "vercelId": "icn1::vmlkb-1792066076534-aff5d43cd06f",
+      "checkedAt": "2026-10-15T12:44:55.183Z",
+      "serverRequestId": "icn1::lsgrz-1792068295141-aa60761805ca",
       "expected": "X-Content-Type-Options: nosniff (정상)"
     },
     {
@@ -176,9 +160,8 @@
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "requestId": "80e88408-8f28-4674-a644-1863e12648a5",
-      "checkedAt": "2026-10-15T12:07:57.414Z",
-      "vercelId": "icn1::iad1::vmlkb-1792066076806-cebac2f1b110",
+      "checkedAt": "2026-10-15T12:44:56.292Z",
+      "serverRequestId": "icn1::iad1::285kk-1792068295625-b5cb2789e85c",
       "expected": "401 LOGIN_REQUIRED"
     },
     {
@@ -186,9 +169,8 @@
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "requestId": "45a5eefb-69da-4d61-9d2b-ae79cb216b2d",
-      "checkedAt": "2026-10-15T12:07:57.645Z",
-      "vercelId": "icn1::iad1::8bhdj-1792066077818-2287cfc101a9",
+      "checkedAt": "2026-10-15T12:44:56.745Z",
+      "serverRequestId": "icn1::iad1::vfvjh-1792068296734-fc3c1605b7fa",
       "expected": "401 LOGIN_REQUIRED"
     },
     {
@@ -196,9 +178,8 @@
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "requestId": "cb225b46-4f78-4e90-9358-a274ffb4712f",
-      "checkedAt": "2026-10-15T12:07:58.606Z",
-      "vercelId": "icn1::iad1::9fjfq-1792066078045-91da2f29fb75",
+      "checkedAt": "2026-10-15T12:44:57.888Z",
+      "serverRequestId": "icn1::iad1::qgv64-1792068297188-2b71f1de7053",
       "expected": "401 LOGIN_REQUIRED"
     },
     {
@@ -206,9 +187,8 @@
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "requestId": "4d6e08d8-b52a-4369-a0d1-af75b51d8ce6",
-      "checkedAt": "2026-10-15T12:07:58.850Z",
-      "vercelId": "icn1::iad1::hfqvn-1792066079000-d1ed844c7868",
+      "checkedAt": "2026-10-15T12:44:58.104Z",
+      "serverRequestId": "icn1::iad1::zm8m5-1792068298328-300cf10ab8ff",
       "expected": "401 LOGIN_REQUIRED"
     },
     {
@@ -216,9 +196,8 @@
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_FAILED\"}",
-      "requestId": "b3ec60d7-4768-4951-946e-0494a442a96e",
-      "checkedAt": "2026-10-15T12:08:00.343Z",
-      "vercelId": "icn1::iad1::jkb6g-1792066079245-a7be35f2eee6",
+      "checkedAt": "2026-10-15T12:44:59.596Z",
+      "serverRequestId": "icn1::iad1::2rj9m-1792068298547-6a41be4b45a3",
       "expected": "401 LOGIN_FAILED"
     },
     {
@@ -226,9 +205,8 @@
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401",
-      "requestId": "50af0aad-7702-4684-9508-be38f41fa37e",
-      "checkedAt": "2026-10-15T12:08:00.640Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:44:59.926Z",
+      "serverRequestId": "01a13f98-2d31-79f8-b116-655e5fe6197c",
       "expected": "401/403"
     },
     {
@@ -236,9 +214,8 @@
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401",
-      "requestId": "df5d8462-ce6d-4899-bfed-bc2f24dcebf6",
-      "checkedAt": "2026-10-15T12:08:00.684Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:44:59.973Z",
+      "serverRequestId": "01a13f98-2e6f-70d9-8b8c-f6fd74aa76ea",
       "expected": "401/403"
     },
     {
@@ -246,9 +223,8 @@
       "result": "pass",
       "status": null,
       "observed": "키 문자열 없음=true, /data.json 404=true",
-      "requestId": "0bddf97c-8c57-4287-82cb-fc1b000695fa",
-      "checkedAt": "2026-10-15T12:08:00.719Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:45:00.009Z",
+      "serverRequestId": "icn1::9q28m-1792068300415-45cfdcc397c2",
       "expected": "키 문자열 없음, 옛 파일 404"
     },
     {
@@ -256,9 +232,8 @@
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "requestId": "a59f3a62-b47e-43aa-86b3-ed491d41d827",
-      "checkedAt": "2026-10-15T12:08:01.647Z",
-      "vercelId": "icn1::iad1::hfqvn-1792066081112-9a74fd5bf07c",
+      "checkedAt": "2026-10-15T12:45:01.179Z",
+      "serverRequestId": "icn1::iad1::6v45h-1792068300450-3f1e90827795",
       "expected": "401 LOGIN_REQUIRED"
     },
     {
@@ -266,9 +241,8 @@
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "requestId": "59ba037d-664a-4e8b-b3ec-d46b9ad464a7",
-      "checkedAt": "2026-10-15T12:08:01.868Z",
-      "vercelId": "icn1::iad1::9fjfq-1792066082042-3c6513d056ce",
+      "checkedAt": "2026-10-15T12:45:01.395Z",
+      "serverRequestId": "icn1::iad1::mvhn2-1792068301622-f72e743d4c7f",
       "expected": "401 LOGIN_REQUIRED"
     },
     {
@@ -276,9 +250,8 @@
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "requestId": "a0ebe10c-3421-4f05-9e1f-0577271572e1",
-      "checkedAt": "2026-10-15T12:08:02.844Z",
-      "vercelId": "icn1::iad1::km5nx-1792066082262-26462b47d395",
+      "checkedAt": "2026-10-15T12:45:02.481Z",
+      "serverRequestId": "icn1::iad1::42vbh-1792068301835-c66b8f718f4f",
       "expected": "401 LOGIN_REQUIRED"
     },
     {
@@ -286,49 +259,44 @@
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "requestId": "b6b2b598-6122-4779-a17b-aa18b27180a7",
-      "checkedAt": "2026-10-15T12:08:03.856Z",
-      "vercelId": "icn1::iad1::cjtrv-1792066083238-71ac10d37b74",
+      "checkedAt": "2026-10-15T12:45:03.329Z",
+      "serverRequestId": "icn1::iad1::bkgj2-1792068302926-e7af14912637",
       "expected": "401 LOGIN_REQUIRED"
     },
     {
       "id": "S03-05",
       "result": "pass",
       "status": 201,
-      "observed": "HTTP 201, 응답 {\"id\":\"54e01c32-ad4c-43b5-b190-08150ed6447b\"}",
-      "requestId": "3fecbda1-2b8a-4049-ad7d-faab6ca8780c",
-      "checkedAt": "2026-10-15T12:08:07.424Z",
-      "vercelId": "icn1::iad1::jkb6g-1792066085548-6d957aacf235",
+      "observed": "HTTP 201, 응답 {\"id\":\"ef809815-ec16-475b-8bb6-f0573d2aafa5\"}",
+      "checkedAt": "2026-10-15T12:45:06.988Z",
+      "serverRequestId": "icn1::iad1::bkgj2-1792068304770-80f85f12bc7e",
       "expected": "201 + id (정상)"
     },
     {
       "id": "S03-06",
       "result": "pass",
       "status": 200,
-      "observed": "HTTP 200, 응답 {\"id\":\"54e01c32-ad4c-43b5-b190-08150ed6447b\",\"title\":\"camp-A-af8863dd\",\"body\":\"재시험용 가상 메모 A (실제 정보 아님)\"}",
-      "requestId": "3d20ad50-dbbe-4b83-8662-f7cb0fcd1bc5",
-      "checkedAt": "2026-10-15T12:08:09.352Z",
-      "vercelId": "icn1::iad1::55jfr-1792066087849-9fa5f2c14710",
+      "observed": "HTTP 200, 응답 {\"id\":\"ef809815-ec16-475b-8bb6-f0573d2aafa5\",\"title\":\"camp-A-eeb33565\",\"body\":\"재시험용 가상 메모 A (실제 정보 아님)\"}",
+      "checkedAt": "2026-10-15T12:45:08.848Z",
+      "serverRequestId": "icn1::iad1::285kk-1792068307456-ed026aa93584",
       "expected": "200, 만든 내용 그대로 (정상)"
     },
     {
       "id": "S03-07",
       "result": "pass",
       "status": 200,
-      "observed": "HTTP 200, 응답 {\"id\":\"54e01c32-ad4c-43b5-b190-08150ed6447b\",\"title\":\"camp-A-af8863dd\",\"body\":\"고친 내용 (재시험)\"}",
-      "requestId": "ad6c7726-d507-49f2-893f-83c3cabec956",
-      "checkedAt": "2026-10-15T12:08:10.478Z",
-      "vercelId": "icn1::iad1::cjtrv-1792066089748-69446daa27eb",
+      "observed": "HTTP 200, 응답 {\"id\":\"ef809815-ec16-475b-8bb6-f0573d2aafa5\",\"title\":\"camp-A-eeb33565\",\"body\":\"고친 내용 (재시험)\"}",
+      "checkedAt": "2026-10-15T12:45:10.007Z",
+      "serverRequestId": "icn1::iad1::lsgrz-1792068309291-995b87cdbee5",
       "expected": "200, 고친 내용 (정상)"
     },
     {
       "id": "S03-08",
       "result": "pass",
       "status": null,
-      "observed": "삭제 HTTP 200, 응답 {\"id\":\"54e01c32-ad4c-43b5-b190-08150ed6447b\"} / 재조회 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"}",
-      "requestId": "db613f55-036f-497b-94f0-fd3aa17142c0",
-      "checkedAt": "2026-10-15T12:08:13.120Z",
-      "vercelId": null,
+      "observed": "삭제 HTTP 200, 응답 {\"id\":\"ef809815-ec16-475b-8bb6-f0573d2aafa5\"} / 재조회 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"}",
+      "checkedAt": "2026-10-15T12:45:13.034Z",
+      "serverRequestId": "icn1::iad1::285kk-1792068310447-4573ff2f0396",
       "expected": "삭제 200, 재조회 404 (정상)"
     },
     {
@@ -336,29 +304,26 @@
       "result": "pass",
       "status": 404,
       "observed": "HTTP 404, 응답 {\"error\":\"NOT_FOUND\"}",
-      "requestId": "79abf825-e4ad-475e-a2ae-da1e6cbec679",
-      "checkedAt": "2026-10-15T12:08:16.578Z",
-      "vercelId": "icn1::iad1::46kfd-1792066095444-4a32304ed6cb",
+      "checkedAt": "2026-10-15T12:45:16.437Z",
+      "serverRequestId": "icn1::iad1::2rj9m-1792068315386-e1df6492f383",
       "expected": "404 NOT_FOUND"
     },
     {
       "id": "S04-02",
       "result": "pass",
       "status": null,
-      "observed": "B' 수정 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"} / A' 재조회 HTTP 200, 응답 {\"id\":\"dd3a97b8-5ae0-4d1a-97e9-108a8a423624\",\"title\":\"camp-A-af8863dd\",\"body\":\"재시험용 가상 메모 A (실제 정보 아님)\"}",
-      "requestId": "22aad12a-4ab2-463d-8954-6288c9a1c423",
-      "checkedAt": "2026-10-15T12:08:19.611Z",
-      "vercelId": null,
+      "observed": "B' 수정 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"} / A' 재조회 HTTP 200, 응답 {\"id\":\"bb98b8a4-e195-4a19-83ee-632d2e1d45f3\",\"title\":\"camp-A-eeb33565\",\"body\":\"재시험용 가상 메모 A (실제 정보 아님)\"}",
+      "checkedAt": "2026-10-15T12:45:19.172Z",
+      "serverRequestId": "icn1::iad1::sdt9k-1792068316887-aa97acf3f434",
       "expected": "404 NOT_FOUND, A' 메모 그대로"
     },
     {
       "id": "S04-03",
       "result": "pass",
       "status": null,
-      "observed": "B' 삭제 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"} / A' 재조회 HTTP 200, 응답 {\"id\":\"dd3a97b8-5ae0-4d1a-97e9-108a8a423624\",\"title\":\"camp-A-af8863dd\",\"body\":\"재시험용 가상 메모 A (실제 정보 아님)\"}",
-      "requestId": "a7ec23b6-b696-4d03-b918-fd5c4b55bc2f",
-      "checkedAt": "2026-10-15T12:08:21.671Z",
-      "vercelId": null,
+      "observed": "B' 삭제 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"} / A' 재조회 HTTP 200, 응답 {\"id\":\"bb98b8a4-e195-4a19-83ee-632d2e1d45f3\",\"title\":\"camp-A-eeb33565\",\"body\":\"재시험용 가상 메모 A (실제 정보 아님)\"}",
+      "checkedAt": "2026-10-15T12:45:21.415Z",
+      "serverRequestId": "icn1::iad1::bqhhg-1792068319613-c58dd6c1357e",
       "expected": "404 NOT_FOUND, A' 메모 남아 있음"
     },
     {
@@ -366,9 +331,8 @@
       "result": "pass",
       "status": 200,
       "observed": "목록 길이=0, A' 포함=false",
-      "requestId": "26aa91bc-186d-41bd-a68b-74a6752e4e33",
-      "checkedAt": "2026-10-15T12:08:22.850Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:45:22.896Z",
+      "serverRequestId": "icn1::iad1::9q28m-1792068321855-907c5d97849d",
       "expected": "200, A' 메모 id 없음"
     },
     {
@@ -376,19 +340,17 @@
       "result": "pass",
       "status": 200,
       "observed": "본문 키=email,expiresAt, Set-Cookie 개수=2",
-      "requestId": "5d072bfb-843d-4499-8562-bb9048610402",
-      "checkedAt": "2026-10-15T12:08:24.118Z",
-      "vercelId": "icn1::iad1::sgmbk-1792066103504-a63a344a003e",
+      "checkedAt": "2026-10-15T12:45:23.613Z",
+      "serverRequestId": "icn1::iad1::fsrkx-1792068323480-16ee474b4d3e",
       "expected": "200, 본문은 email·expiresAt뿐, httpOnly 쿠키 2개 (정상)"
     },
     {
       "id": "S08-01",
       "result": "pass",
       "status": 201,
-      "observed": "HTTP 201, 응답 {\"id\":\"93f11f41-4d45-478d-9b4c-29b135ab81a4\"}",
-      "requestId": "698d9cd5-bf1a-49f2-85a2-5236090e4d87",
-      "checkedAt": "2026-10-15T12:08:26.093Z",
-      "vercelId": "icn1::iad1::sgmbk-1792066104565-113a02414d87",
+      "observed": "HTTP 201, 응답 {\"id\":\"8eedf29d-e648-45df-8010-3ea015dd6295\"}",
+      "checkedAt": "2026-10-15T12:45:26.191Z",
+      "serverRequestId": "icn1::iad1::285kk-1792068324121-1dffd9e45414",
       "expected": "201 + id (정상)"
     },
     {
@@ -396,19 +358,17 @@
       "result": "pass",
       "status": 404,
       "observed": "HTTP 404, 응답 {\"error\":\"NOT_FOUND\"}",
-      "requestId": "9f87dbfb-7f86-47d0-b198-717be92e7642",
-      "checkedAt": "2026-10-15T12:08:28.553Z",
-      "vercelId": "icn1::iad1::krbbp-1792066106489-dcedc28aa46f",
+      "checkedAt": "2026-10-15T12:45:28.294Z",
+      "serverRequestId": "icn1::iad1::2rj9m-1792068326632-5f8b1452c763",
       "expected": "404 NOT_FOUND"
     },
     {
       "id": "S08-03",
       "result": "pass",
       "status": null,
-      "observed": "B' 수정 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"} / A' 재조회 HTTP 200, 응답 {\"id\":\"93f11f41-4d45-478d-9b4c-29b135ab81a4\",\"title\":\"camp-ann-A-af8863dd\",\"body\":\"재시험용 가상 공지 A (실제 정보 아님)\"}",
-      "requestId": "9f10fcfb-8b9b-439c-bb4c-2ac8af54932d",
-      "checkedAt": "2026-10-15T12:08:31.624Z",
-      "vercelId": null,
+      "observed": "B' 수정 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"} / A' 재조회 HTTP 200, 응답 {\"id\":\"8eedf29d-e648-45df-8010-3ea015dd6295\",\"title\":\"camp-ann-A-eeb33565\",\"body\":\"재시험용 가상 공지 A (실제 정보 아님)\"}",
+      "checkedAt": "2026-10-15T12:45:31.014Z",
+      "serverRequestId": "icn1::iad1::2rj9m-1792068328737-c143bc955da1",
       "expected": "404 NOT_FOUND, A' 공지 그대로"
     },
     {
@@ -416,9 +376,8 @@
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "requestId": "b30c5577-5dbd-4b83-9415-b85b02d1d611",
-      "checkedAt": "2026-10-15T12:08:31.853Z",
-      "vercelId": "icn1::iad1::vmlkb-1792066112019-3b3da3653d9a",
+      "checkedAt": "2026-10-15T12:45:31.234Z",
+      "serverRequestId": "icn1::iad1::lsgrz-1792068331457-8b932c2d6d2a",
       "expected": "401 LOGIN_REQUIRED"
     },
     {
@@ -426,9 +385,8 @@
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "requestId": "dce13221-5184-446a-b18a-09220043c9e1",
-      "checkedAt": "2026-10-15T12:08:32.071Z",
-      "vercelId": "icn1::iad1::vmlkb-1792066112249-d1ed90dd8193",
+      "checkedAt": "2026-10-15T12:45:31.475Z",
+      "serverRequestId": "icn1::iad1::285kk-1792068331676-854dbc588eab",
       "expected": "401 LOGIN_REQUIRED"
     },
     {
@@ -436,9 +394,8 @@
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "requestId": "4d3a7b18-db9e-4def-b0a7-dc95a072b83a",
-      "checkedAt": "2026-10-15T12:08:32.288Z",
-      "vercelId": "icn1::iad1::vmlkb-1792066112467-0e7f5bc3d33e",
+      "checkedAt": "2026-10-15T12:45:31.694Z",
+      "serverRequestId": "icn1::iad1::lsgrz-1792068331919-0c5482f43d55",
       "expected": "401 LOGIN_REQUIRED"
     },
     {
@@ -446,19 +403,17 @@
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "requestId": "c56a7e27-00b6-44d3-a685-33704e3239ec",
-      "checkedAt": "2026-10-15T12:08:33.389Z",
-      "vercelId": "icn1::iad1::sgmbk-1792066112907-52c7301a0d85",
+      "checkedAt": "2026-10-15T12:45:32.798Z",
+      "serverRequestId": "icn1::iad1::285kk-1792068332358-972b6e789c03",
       "expected": "401 LOGIN_REQUIRED"
     },
     {
       "id": "S10-02",
       "result": "pass",
       "status": 200,
-      "observed": "복구 HTTP 200, 응답 {\"id\":\"9945ef15-95cc-4f05-89d5-3c9b5809aeb2\",\"title\":\"camp-B-af8863dd\",\"body\":\"재시험용 가상 메모 B 원본 (실제 정보 아님)\",\"ownerId\":\"0387b47f-0504-44ef-a32e-fc5f3cb0306c\",\"contentSha256\":\"01adc603a57d000b06190f91f1ec49e25c3576cb40efc112c6527de732fe4270\",\"restoredFrom\":\"2026-10-15T12:08:35.491Z\",\"au…",
-      "requestId": "bdf53b98-b2dc-4f2a-87db-b0fca08cbcb3",
-      "checkedAt": "2026-10-15T12:08:42.526Z",
-      "vercelId": "icn1::iad1::krbbp-1792066117348-5af272d46f40",
+      "observed": "복구 HTTP 200, 응답 {\"id\":\"37f7bc28-fc10-418b-ab3f-2568bd6982c3\",\"title\":\"camp-B-eeb33565\",\"body\":\"재시험용 가상 메모 B 원본 (실제 정보 아님)\",\"ownerId\":\"a80ed954-51fd-42b3-85e3-ba099092a81a\",\"contentSha256\":\"01adc603a57d000b06190f91f1ec49e25c3576cb40efc112c6527de732fe4270\",\"restoredFrom\":\"2026-10-15T12:45:35.584Z\",\"au…",
+      "checkedAt": "2026-10-15T12:45:40.724Z",
+      "serverRequestId": "icn1::iad1::jw66r-1792068336954-e6995e2fcad5",
       "expected": "200, 원본으로 돌아옴, 3값 대조 true, audit recorded (정상)"
     },
     {
@@ -466,19 +421,17 @@
       "result": "pass",
       "status": 404,
       "observed": "HTTP 404, 응답 {\"error\":\"NOT_FOUND\",\"verification\":{\"backupId\":null,\"backupSha256\":null,\"idMatch\":null,\"ownerMatch\":null,\"hashMatch\":null,\"persistedSha256\":null,\"rolledBack\":false,\"audit\":\"not_written\"}}",
-      "requestId": "6dc836a6-2a97-4054-b6a4-33e289d20206",
-      "checkedAt": "2026-10-15T12:08:43.740Z",
-      "vercelId": "icn1::iad1::krbbp-1792066122921-4d7fa99d5e6d",
+      "checkedAt": "2026-10-15T12:45:41.764Z",
+      "serverRequestId": "icn1::iad1::9q28m-1792068341165-544d14f112f4",
       "expected": "404 NOT_FOUND, 대조값(backupId·backupSha256·idMatch·ownerMatch·hashMatch·persistedSha256)은 전부 null, rolledBack=false, audit=not_written"
     },
     {
       "id": "S10-04",
       "result": "pass",
       "status": 200,
-      "observed": "HTTP 200, 응답 {\"id\":\"dd3a97b8-5ae0-4d1a-97e9-108a8a423624\",\"title\":\"camp-A-af8863dd\",\"body\":\"재시험용 가상 메모 A (실제 정보 아님)\"}",
-      "requestId": "6f00b6b0-9660-4246-b60b-86b367b9fafe",
-      "checkedAt": "2026-10-15T12:08:45.258Z",
-      "vercelId": "icn1::iad1::sgmbk-1792066124136-05aaf2506f99",
+      "observed": "HTTP 200, 응답 {\"id\":\"bb98b8a4-e195-4a19-83ee-632d2e1d45f3\",\"title\":\"camp-A-eeb33565\",\"body\":\"재시험용 가상 메모 A (실제 정보 아님)\"}",
+      "checkedAt": "2026-10-15T12:45:42.882Z",
+      "serverRequestId": "icn1::iad1::fsshf-1792068342208-fd12927ca3d9",
       "expected": "200, 원래 내용 그대로 (정상)"
     },
     {
@@ -486,9 +439,8 @@
       "result": "pass",
       "status": 403,
       "observed": "HTTP 403, 응답 {\"error\":\"DEVICE_NOT_APPROVED\"}",
-      "requestId": "650fed46-975d-4fb9-b6ac-99fd7f37b9ec",
-      "checkedAt": "2026-10-15T12:08:47.358Z",
-      "vercelId": "icn1::iad1::r8tjv-1792066125912-1a245c7e7fe2",
+      "checkedAt": "2026-10-15T12:45:44.057Z",
+      "serverRequestId": "icn1::iad1::fsshf-1792068343628-7b92cf4fb7b4",
       "expected": "403 DEVICE_NOT_APPROVED"
     },
     {
@@ -496,9 +448,8 @@
       "result": "pass",
       "status": null,
       "observed": "요청 HTTP 200, 응답 {\"status\":\"pending\"} / 메모 HTTP 403, 응답 {\"error\":\"DEVICE_NOT_APPROVED\"}",
-      "requestId": "66632300-8efd-4c94-b56d-ee2148a18654",
-      "checkedAt": "2026-10-15T12:08:50.462Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:45:46.706Z",
+      "serverRequestId": "icn1::iad1::285kk-1792068344499-80261f5e7297",
       "expected": "승인 요청 200 pending, 메모 403"
     },
     {
@@ -506,9 +457,8 @@
       "result": "pass",
       "status": 200,
       "observed": "HTTP 200, 응답 []",
-      "requestId": "0d2e66f5-90e1-4f6a-b942-a8f6dfd99c87",
-      "checkedAt": "2026-10-15T12:08:52.184Z",
-      "vercelId": "icn1::iad1::km5nx-1792066131063-2a4fcc0f5510",
+      "checkedAt": "2026-10-15T12:45:48.226Z",
+      "serverRequestId": "icn1::iad1::bqhhg-1792068347194-d332a524caf0",
       "expected": "200 (정상)"
     },
     {
@@ -516,9 +466,8 @@
       "result": "pass",
       "status": null,
       "observed": "메모 HTTP 403, 응답 {\"error\":\"DEVICE_NOT_APPROVED\"} / 재요청 HTTP 200, 응답 {\"status\":\"revoked\"}",
-      "requestId": "49831385-4ac8-413d-83cc-aa31f69b9eb8",
-      "checkedAt": "2026-10-15T12:08:54.605Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:45:50.636Z",
+      "serverRequestId": "icn1::iad1::bkgj2-1792068348713-6a7ded801d4b",
       "expected": "메모 403, 재요청해도 revoked"
     },
     {
@@ -526,9 +475,8 @@
       "result": "pass",
       "status": 403,
       "observed": "거부 HTTP 403, 응답 {\"error\":\"CSRF_REJECTED\"}, 메모 수 0->0",
-      "requestId": "8c5de89c-cfa8-4712-a164-7752039e0f66",
-      "checkedAt": "2026-10-15T12:08:57.256Z",
-      "vercelId": "icn1::iad1::hz6cw-1792066136167-b263bf57cc2c",
+      "checkedAt": "2026-10-15T12:45:53.517Z",
+      "serverRequestId": "icn1::iad1::6v45h-1792068352271-07f7ad71db8c",
       "expected": "403 CSRF_REJECTED, 메모 수 그대로"
     },
     {
@@ -536,9 +484,8 @@
       "result": "pass",
       "status": 200,
       "observed": "HTTP 200, 응답 []",
-      "requestId": "74bd56b1-e50e-495a-bc18-b954a539b92b",
-      "checkedAt": "2026-10-15T12:08:58.720Z",
-      "vercelId": "icn1::iad1::h62tk-1792066137653-8798e535780a",
+      "checkedAt": "2026-10-15T12:45:55.062Z",
+      "serverRequestId": "icn1::iad1::285kk-1792068353959-4b3035338013",
       "expected": "200 (정상)"
     },
     {
@@ -546,9 +493,8 @@
       "result": "pass",
       "status": 200,
       "observed": "HTTP 200, 응답 {\"status\":\"approved\"}",
-      "requestId": "fc074825-508f-44af-85fe-0587a986fb5f",
-      "checkedAt": "2026-10-15T12:09:00.488Z",
-      "vercelId": "icn1::iad1::4z469-1792066139118-5d6dba967ead",
+      "checkedAt": "2026-10-15T12:45:56.242Z",
+      "serverRequestId": "icn1::iad1::bkgj2-1792068355505-5681ff26ad87",
       "expected": "200 approved (정상)"
     },
     {
@@ -556,9 +502,8 @@
       "result": "pass",
       "status": null,
       "observed": "무인증 HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"} / 타인조회 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"}",
-      "requestId": "19db7dd9-fed3-4d47-a83e-c9cf6942b870",
-      "checkedAt": "2026-10-15T12:09:02.914Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:45:57.451Z",
+      "serverRequestId": "icn1::iad1::pkrkc-1792068356683-ff28c3b0d205",
       "expected": "401 + 404, 어느 응답에도 메모 내용 없음"
     },
     {
@@ -566,19 +511,17 @@
       "result": "pass",
       "status": null,
       "observed": "승인 전 HTTP 403, 응답 {\"error\":\"DEVICE_NOT_APPROVED\"} / 로그아웃 HTTP 200, 응답 {\"ok\":true} / 재시도 HTTP 403, 응답 {\"error\":\"DEVICE_NOT_APPROVED\"}",
-      "requestId": "52c6023c-49dd-40fd-8435-07d799b08a93",
-      "checkedAt": "2026-10-15T12:09:07.387Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:46:00.469Z",
+      "serverRequestId": "icn1::iad1::pkrkc-1792068360006-a4184acbf905",
       "expected": "승인 전 403, 로그아웃 뒤 재시도 401/403"
     },
     {
       "id": "S12-03",
       "result": "pass",
       "status": null,
-      "observed": "무서명 수정(메모) HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"} / 무서명 수정(공지) HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"} / 타인 조회 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"} / 구역 밖 조회 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"} / 재확인 HTTP 200, 응답 {\"id\":\"9945ef15-95cc-4f05-89d5-3c9b5809aeb2\",\"title\":\"camp-B-af8863dd\",\"body\":\"재시험용 가상 메모…",
-      "requestId": "b9d48ef8-5a54-4856-b4a4-127af2b93033",
-      "checkedAt": "2026-10-15T12:09:10.215Z",
-      "vercelId": null,
+      "observed": "무서명 수정(메모) HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"} / 무서명 수정(공지) HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"} / 타인 조회 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"} / 구역 밖 조회 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"} / 재확인 HTTP 200, 응답 {\"id\":\"37f7bc28-fc10-418b-ab3f-2568bd6982c3\",\"title\":\"camp-B-eeb33565\",\"body\":\"재시험용 가상 메모…",
+      "checkedAt": "2026-10-15T12:46:03.127Z",
+      "serverRequestId": "icn1::iad1::84cl4-1792068360914-ee8293b95d91",
       "expected": "401·401·404·404, 복구된 내용 그대로"
     },
     {
@@ -586,9 +529,8 @@
       "result": "not_run",
       "status": null,
       "observed": "이번 실행에서 다루지 않음",
-      "requestId": "06114541-723b-420b-8017-a012e0d4d7b5",
-      "checkedAt": "2026-10-15T12:09:10.931Z",
-      "vercelId": null,
+      "checkedAt": "2026-10-15T12:46:03.884Z",
+      "serverRequestId": null,
       "expected": "401/403"
     }
   ]

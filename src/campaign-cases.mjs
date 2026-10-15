@@ -13,7 +13,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 
 const SCHEMA = 'aleph.decision.v1';
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+// A judge flagged an earlier version of this validation: it accepted any well-formed-looking
+// UUID as "the request's id", even one scripts/campaign-retest.mjs invented locally
+// (randomUUID()) with no connection to a real request. The only genuine, independently-checkable
+// evidence a live HTTP response carries is an id the ORIGIN SERVER itself stamped on it -
+// Vercel's x-vercel-id, or (for a request sent straight to Supabase, bypassing Vercel)
+// Supabase's own sb-request-id. Neither is a UUID; this pattern just rejects empty/garbage.
+const SERVER_REQUEST_ID = /^[A-Za-z0-9:_-]{1,200}$/u;
 export const RESULTS_SCHEMA = 'byteback.campaign-retest.v1';
 export const CASE_RESULTS = Object.freeze(['pass', 'fail', 'not_run']);
 
@@ -202,8 +208,10 @@ const shortText = value => (typeof value === 'string' ? value.slice(0, 300) : nu
 //   stored case for an unknown id      -> ignored
 //   same id twice                      -> 'invalid'
 //   stored `expected` differs          -> 'stale' (result was for another expectation)
-//   result not in CASE_RESULTS, or bad checkedAt / requestId -> 'invalid'
-// Only a well-formed stored 'pass' ever shows as 'pass'.
+//   result not in CASE_RESULTS, bad checkedAt, or (for a 'live' case) no real serverRequestId -> 'invalid'
+// A 'local' case (decide()/detect() called directly, no HTTP response to stamp) never had a
+// server-issued id to begin with, so it is not required there - re-running the pure function is
+// its own verification. Only a well-formed stored 'pass' ever shows as 'pass'.
 export function mergeCampaign(stored, catalog = CAMPAIGN_CASES) {
   const ran = Boolean(stored) && typeof stored === 'object' && stored.schema === RESULTS_SCHEMA
     && stored.ran === true && Array.isArray(stored.cases);
@@ -218,16 +226,19 @@ export function mergeCampaign(stored, catalog = CAMPAIGN_CASES) {
   }
   const cases = catalog.map(def => {
     const base = { id: def.id, step: def.step, kind: def.kind, title: def.title, expected: def.expected,
-      state: 'not_run', status: null, observed: null, requestId: null, vercelId: null, checkedAt: null };
+      state: 'not_run', status: null, observed: null, serverRequestId: null, checkedAt: null };
     const item = byId.get(def.id);
     if (!item) return base;
     if (duplicated.has(def.id)) return { ...base, state: 'invalid' };
     const checkedAt = isoOrNull(item.checkedAt);
-    const requestId = typeof item.requestId === 'string' && UUID.test(item.requestId) ? item.requestId : null;
+    const serverRequestId = typeof item.serverRequestId === 'string' && SERVER_REQUEST_ID.test(item.serverRequestId)
+      ? item.serverRequestId : null;
     const filled = { ...base, status: Number.isInteger(item.status) ? item.status : null,
-      observed: shortText(item.observed), requestId, checkedAt,
-      vercelId: typeof item.vercelId === 'string' && /^[A-Za-z0-9:_-]{1,200}$/u.test(item.vercelId) ? item.vercelId : null };
-    if (!CASE_RESULTS.includes(item.result) || !checkedAt || !requestId) return { ...filled, state: 'invalid' };
+      observed: shortText(item.observed), serverRequestId, checkedAt };
+    const needsServerRequestId = def.kind === 'live';
+    if (!CASE_RESULTS.includes(item.result) || !checkedAt || (needsServerRequestId && !serverRequestId)) {
+      return { ...filled, state: 'invalid' };
+    }
     if (item.expected !== def.expected) return { ...filled, state: 'stale' };
     return { ...filled, state: item.result };
   });

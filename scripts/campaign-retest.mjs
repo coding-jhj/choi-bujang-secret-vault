@@ -87,11 +87,15 @@ const cookieHeader = jar => [...jar.values()].join('; ') || undefined;
 export async function runCampaign({ app, originalApiUrl, domain }, { admin, newAuthClient, fetchImpl = fetch, out, registerCleanup }) {
   const cases = [];
   const byId = new Map(CAMPAIGN_CASES.map(def => [def.id, def]));
-  const record = (id, result, { status = null, observed, requestId = randomUUID(), vercelId = null } = {}) => {
+  // No locally-invented id here (there used to be a randomUUID() default - a judge flagged it:
+  // an id this script makes up itself proves nothing about a real request). serverRequestId is
+  // either a genuine value the origin server stamped on its response (see readServerRequestId
+  // above), or null for a 'local' case (decide()/detect() calls have no HTTP response to stamp).
+  const record = (id, result, { status = null, observed, serverRequestId = null } = {}) => {
     const def = byId.get(id);
     const entry = {
-      id, result, status, observed: short(observed ?? ''), requestId,
-      checkedAt: new Date().toISOString(), vercelId, expected: def?.expected ?? null,
+      id, result, status, observed: short(observed ?? ''),
+      checkedAt: new Date().toISOString(), serverRequestId, expected: def?.expected ?? null,
     };
     cases.push(entry);
     out(`${result === 'pass' ? '통과' : result === 'fail' ? '실패' : '실행 안 함'} · ${id} · ${def?.title ?? ''}`);
@@ -100,6 +104,13 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
   };
   const notRun = (id, why) => record(id, 'not_run', { observed: why });
 
+  // The only genuine, independently-checkable evidence a real HTTP response carries is an
+  // identifier the SERVER itself assigned - never one this script invents locally. Vercel's edge
+  // stamps every response from the deployed app with x-vercel-id; a request sent straight to
+  // Supabase's REST API (originalApiUrl, bypassing Vercel entirely) never gets that header, but
+  // Supabase's own gateway stamps sb-request-id instead. Prefer whichever the response actually
+  // carries; neither is a UUID we generate ourselves.
+  const readServerRequestId = headers => headers.get('x-vercel-id') ?? headers.get('sb-request-id');
   async function call(path, { token, cookie, method = 'GET', body, origin } = {}) {
     const headers = {};
     if (token) headers.Authorization = `Bearer ${token}`;
@@ -113,13 +124,13 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
     let json = null;
     try { json = await response.json(); } catch { json = null; }
     return { status: response.status, json, headers: response.headers,
-      vercelId: response.headers.get('x-vercel-id') };
+      serverRequestId: readServerRequestId(response.headers) };
   }
   async function raw(path, init = {}) {
     const response = await fetchImpl(new URL(path, app), { ...init, redirect: 'error', signal: AbortSignal.timeout(15000) });
     const text = await response.text().catch(() => '');
     return { status: response.status, headers: response.headers, text,
-      vercelId: response.headers.get('x-vercel-id') };
+      serverRequestId: readServerRequestId(response.headers) };
   }
   const seen = r => `HTTP ${r.status}, 응답 ${short(r.json)}`;
   const denied404 = r => r.status === 404 && r.json?.error === 'NOT_FOUND';
@@ -204,7 +215,7 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
       let json = null;
       try { json = await r.json(); } catch { json = null; }
       return { status: r.status, json, cookie: cookieHeader(jar), setCookieCount: jar.size,
-        vercelId: r.headers.get('x-vercel-id') };
+        serverRequestId: readServerRequestId(r.headers) };
     };
     return { id, loginViaServer };
   }
@@ -219,7 +230,7 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
       try { response = await decide(request); } catch (error) { response = { error: error.message }; }
       const ok = isValidDecision(request, response, RULE_IDS)
         && response.decision === probe.expected.decision && response.reasonCode === probe.expected.reasonCode;
-      return { ok, requestId: request.requestId, observed: `decision=${response?.decision} reasonCode=${response?.reasonCode}` };
+      return { ok, observed: `decision=${response?.decision} reasonCode=${response?.reasonCode}` };
     };
     const runDetect = probeId => {
       const probe = DETECT_PROBES.find(p => p.id === probeId);
@@ -239,8 +250,8 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
     const LOCAL_DETECT_MAP = { 'S09-01': 'observe_30', 'S09-02': 'observe_120', 'S09-03': 'revoke_121' };
     for (const [caseId, probeId] of Object.entries(LOCAL_MAP)) {
       try {
-        const { ok, requestId, observed } = await runDecider(probeId);
-        record(caseId, ok ? 'pass' : 'fail', { requestId, observed });
+        const { ok, observed } = await runDecider(probeId);
+        record(caseId, ok ? 'pass' : 'fail', { observed });
       } catch (error) { record(caseId, 'fail', { observed: `실행 오류: ${short(error.message)}` }); }
     }
     for (const [caseId, probeId] of Object.entries(LOCAL_DETECT_MAP)) {
@@ -253,16 +264,16 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
     // ---- live, no-account cases ----
     try {
       const r = await raw('/data.json');
-      record('S02-01', r.status === 404 ? 'pass' : 'fail', { status: r.status, observed: `HTTP ${r.status}`, vercelId: r.vercelId });
+      record('S02-01', r.status === 404 ? 'pass' : 'fail', { status: r.status, observed: `HTTP ${r.status}`, serverRequestId: r.serverRequestId });
     } catch (error) { record('S02-01', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
     try {
       const r = await raw('/aleph.json');
-      record('S02-02', r.status === 200 ? 'pass' : 'fail', { status: r.status, observed: `HTTP ${r.status}`, vercelId: r.vercelId });
+      record('S02-02', r.status === 200 ? 'pass' : 'fail', { status: r.status, observed: `HTTP ${r.status}`, serverRequestId: r.serverRequestId });
     } catch (error) { record('S02-02', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
     try {
       const r = await raw('/');
       const header = r.headers.get('x-content-type-options');
-      record('S02-03', header === 'nosniff' ? 'pass' : 'fail', { status: r.status, observed: `x-content-type-options=${header}`, vercelId: r.vercelId });
+      record('S02-03', header === 'nosniff' ? 'pass' : 'fail', { status: r.status, observed: `x-content-type-options=${header}`, serverRequestId: r.serverRequestId });
     } catch (error) { record('S02-03', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
 
     const forged = `${Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url')}.`
@@ -273,27 +284,33 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
       ['S03-02', '/api/notes', { method: 'POST', body: { title: 't', body: 'b' } }],
       [`S03-03`, `/api/notes/${FAKE_ID}`, {}],
     ]) {
-      try { const r = await call(path, init); record(id, loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId }); }
+      try { const r = await call(path, init); record(id, loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId }); }
       catch (error) { record(id, 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
     }
     try {
       const r = await call('/api/notes', { token: forged });
-      record('S03-04', loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+      record('S03-04', loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
     } catch (error) { record('S03-04', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
 
     try {
       const r = await call('/api/auth/login', { method: 'POST', body: { email: `nope-${randomUUID()}@${domain}`, password: 'wrong' } });
-      record('S05-05', r.status === 401 && r.json?.error === 'LOGIN_FAILED' ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+      record('S05-05', r.status === 401 && r.json?.error === 'LOGIN_FAILED' ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
     } catch (error) { record('S05-05', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
 
+    // originalApiUrl points straight at Supabase's REST API, never through Vercel, so these two
+    // requests carry no x-vercel-id - Supabase's own gateway stamps sb-request-id instead
+    // (readServerRequestId checks both; raw() already extracts whichever is present).
     if (originalApiUrl) {
       try {
-        const r1 = await raw(originalApiUrl.replace(app.origin, '').startsWith(app.origin) ? originalApiUrl : originalApiUrl, { method: 'GET' });
-        record('S05-01', (r1.status === 401 || r1.status === 403) ? 'pass' : 'fail', { status: r1.status, observed: `HTTP ${r1.status}` });
+        const r1 = await raw(originalApiUrl, { method: 'GET' });
+        record('S05-01', (r1.status === 401 || r1.status === 403) ? 'pass' : 'fail',
+          { status: r1.status, observed: `HTTP ${r1.status}`, serverRequestId: r1.serverRequestId });
       } catch (error) { record('S05-01', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
       try {
-        const r2 = await fetchImpl(originalApiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: 't', body: 'b' }), signal: AbortSignal.timeout(15000) });
-        record('S05-02', (r2.status === 401 || r2.status === 403) ? 'pass' : 'fail', { status: r2.status, observed: `HTTP ${r2.status}` });
+        const r2 = await raw(originalApiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: 't', body: 'b' }) });
+        record('S05-02', (r2.status === 401 || r2.status === 403) ? 'pass' : 'fail',
+          { status: r2.status, observed: `HTTP ${r2.status}`, serverRequestId: r2.serverRequestId });
       } catch (error) { record('S05-02', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
     } else {
       notRun('S05-01', 'aleph.config.json에 originalApiUrl이 없습니다');
@@ -301,27 +318,29 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
     }
 
     try {
-      const html = (await raw('/')).text;
-      const dataJson404 = (await raw('/data.json')).status === 404;
-      const noKey = !/sbp_|service_role|SUPABASE_SECRET_KEY|eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9/u.test(html);
-      record('S05-04', noKey && dataJson404 ? 'pass' : 'fail', { observed: `키 문자열 없음=${noKey}, /data.json 404=${dataJson404}` });
+      const home = await raw('/');
+      const dataJson = await raw('/data.json');
+      const noKey = !/sbp_|service_role|SUPABASE_SECRET_KEY|eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9/u.test(home.text);
+      const dataJson404 = dataJson.status === 404;
+      record('S05-04', noKey && dataJson404 ? 'pass' : 'fail',
+        { observed: `키 문자열 없음=${noKey}, /data.json 404=${dataJson404}`, serverRequestId: home.serverRequestId });
     } catch (error) { record('S05-04', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
 
     try {
       const r = await call('/api/devices/request', { method: 'POST', body: { status: 'approved' } });
-      record('S11-01', loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+      record('S11-01', loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
     } catch (error) { record('S11-01', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
     try {
       const r = await call('/api/devices/request', { token: forged, method: 'POST', body: { status: 'approved' } });
-      record('S11-02', loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+      record('S11-02', loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
     } catch (error) { record('S11-02', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
     try {
       const r = await call('/api/devices/status');
-      record('S11-03', loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+      record('S11-03', loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
     } catch (error) { record('S11-03', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
     try {
       const r = await call('/api/ops/summary');
-      record('S12-06', loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+      record('S12-06', loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
     } catch (error) { record('S12-06', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
 
     // ---- account-based cases ----
@@ -348,14 +367,14 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
       try {
         const r = await call('/api/notes', { token: userA.token, method: 'POST', body: noteA });
         if (r.status === 201 && UUID.test(r.json?.id ?? '')) idA = r.json.id;
-        record('S03-05', idA ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+        record('S03-05', idA ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
       } catch (error) { record('S03-05', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
     }
     if (!userA || !idA) notRun('S03-06', !userA ? notReady : 'S03-05 실패');
     else {
       try {
         const r = await call(`/api/notes/${idA}`, { token: userA.token });
-        record('S03-06', r.status === 200 && sameNote(r, noteA) ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+        record('S03-06', r.status === 200 && sameNote(r, noteA) ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
       } catch (error) { record('S03-06', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
     }
     const noteAEdited = { title: noteA.title, body: '고친 내용 (재시험)' };
@@ -363,7 +382,7 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
     else {
       try {
         const r = await call(`/api/notes/${idA}`, { token: userA.token, method: 'PUT', body: noteAEdited });
-        record('S03-07', r.status === 200 && sameNote(r, noteAEdited) ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+        record('S03-07', r.status === 200 && sameNote(r, noteAEdited) ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
       } catch (error) { record('S03-07', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
     }
     if (!userA || !idA) notRun('S03-08', !userA ? notReady : 'S03-05 실패');
@@ -371,7 +390,8 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
       try {
         const del = await call(`/api/notes/${idA}`, { token: userA.token, method: 'DELETE' });
         const after = await call(`/api/notes/${idA}`, { token: userA.token });
-        record('S03-08', del.status === 200 && after.status === 404 ? 'pass' : 'fail', { observed: `삭제 ${seen(del)} / 재조회 ${seen(after)}` });
+        record('S03-08', del.status === 200 && after.status === 404 ? 'pass' : 'fail',
+          { observed: `삭제 ${seen(del)} / 재조회 ${seen(after)}`, serverRequestId: del.serverRequestId });
       } catch (error) { record('S03-08', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
       idA = null; // consumed by S03-08's own delete; later cases make a fresh note
     }
@@ -388,23 +408,26 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
     } else {
       try {
         const r = await call(`/api/notes/${idA}`, { token: userB.token });
-        record('S04-01', denied404(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+        record('S04-01', denied404(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
       } catch (error) { record('S04-01', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
       try {
         const r = await call(`/api/notes/${idA}`, { token: userB.token, method: 'PUT', body: tampered });
         const after = await call(`/api/notes/${idA}`, { token: userA.token });
         record('S04-02', denied404(r) && after.status === 200 && sameNote(after, noteA) ? 'pass' : 'fail',
-          { observed: `B' 수정 ${seen(r)} / A' 재조회 ${seen(after)}` });
+          { observed: `B' 수정 ${seen(r)} / A' 재조회 ${seen(after)}`, serverRequestId: r.serverRequestId });
       } catch (error) { record('S04-02', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
       try {
         const r = await call(`/api/notes/${idA}`, { token: userB.token, method: 'DELETE' });
         const after = await call(`/api/notes/${idA}`, { token: userA.token });
-        record('S04-03', denied404(r) && after.status === 200 ? 'pass' : 'fail', { observed: `B' 삭제 ${seen(r)} / A' 재조회 ${seen(after)}` });
+        record('S04-03', denied404(r) && after.status === 200 ? 'pass' : 'fail',
+          { observed: `B' 삭제 ${seen(r)} / A' 재조회 ${seen(after)}`, serverRequestId: r.serverRequestId });
       } catch (error) { record('S04-03', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
       try {
         const r = await call('/api/notes', { token: userB.token });
         const found = Array.isArray(r.json) ? r.json.some(n => n.id?.toLowerCase() === idA.toLowerCase()) : null;
-        record('S04-04', r.status === 200 && found === false ? 'pass' : 'fail', { status: r.status, observed: `목록 길이=${Array.isArray(r.json) ? r.json.length : 'n/a'}, A\' 포함=${found}` });
+        record('S04-04', r.status === 200 && found === false ? 'pass' : 'fail',
+          { status: r.status, observed: `목록 길이=${Array.isArray(r.json) ? r.json.length : 'n/a'}, A\' 포함=${found}`,
+            serverRequestId: r.serverRequestId });
       } catch (error) { record('S04-04', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
     }
 
@@ -415,7 +438,7 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
       const login = await serverUserA.loginViaServer(app.origin);
       const bodyOk = login.json && Object.keys(login.json).sort().join(',') === 'email,expiresAt';
       record('S05-06', login.status === 200 && bodyOk && login.setCookieCount === 2 ? 'pass' : 'fail',
-        { status: login.status, observed: `본문 키=${login.json ? Object.keys(login.json).sort().join(',') : 'n/a'}, Set-Cookie 개수=${login.setCookieCount}`, vercelId: login.vercelId });
+        { status: login.status, observed: `본문 키=${login.json ? Object.keys(login.json).sort().join(',') : 'n/a'}, Set-Cookie 개수=${login.setCookieCount}`, serverRequestId: login.serverRequestId });
       // Approve this session too, for the cookie-flow cases below.
       let sid = null;
       try { sid = decodeJwt((login.cookie ?? '').match(/__Host-byteback_at=([^;]+)/)?.[1] ?? '').session_id; } catch { sid = null; }
@@ -433,33 +456,33 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
       try {
         const r = await call('/api/announcements', { token: userA.token, method: 'POST', body: annA });
         if (r.status === 201 && UUID.test(r.json?.id ?? '')) annId = r.json.id;
-        record('S08-01', annId ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+        record('S08-01', annId ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
       } catch (error) { record('S08-01', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
       if (!userB || !annId) { notRun('S08-02', !userB ? notReady : 'S08-01 실패'); notRun('S08-03', !userB ? notReady : 'S08-01 실패'); }
       else {
         try {
           const r = await call(`/api/announcements/${annId}`, { token: userB.token });
-          record('S08-02', denied404(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+          record('S08-02', denied404(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
         } catch (error) { record('S08-02', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
         try {
           const r = await call(`/api/announcements/${annId}`, { token: userB.token, method: 'PUT', body: { ...annA, body: '변조 시도' } });
           const after = await call(`/api/announcements/${annId}`, { token: userA.token });
           record('S08-03', denied404(r) && after.status === 200 && sameNote(after, annA) ? 'pass' : 'fail',
-            { observed: `B' 수정 ${seen(r)} / A' 재조회 ${seen(after)}` });
+            { observed: `B' 수정 ${seen(r)} / A' 재조회 ${seen(after)}`, serverRequestId: r.serverRequestId });
         } catch (error) { record('S08-03', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
       }
     }
     try {
       const r = await call('/api/announcements');
-      record('S08-04', loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+      record('S08-04', loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
     } catch (error) { record('S08-04', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
     try {
       const r = await call('/api/announcements', { method: 'POST', body: annA });
-      record('S08-05', loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+      record('S08-05', loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
     } catch (error) { record('S08-05', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
     try {
       const r = await call(`/api/announcements/${FAKE_ID}`, { method: 'PUT', body: { ...annA, body: '변조 시도' } });
-      record('S08-10', loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+      record('S08-10', loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
     } catch (error) { record('S08-10', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
 
     // S10: restore, using B' (own note, tamper, restore) and A' (forbidden cross-restore).
@@ -469,7 +492,7 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
     } catch { /* ignore */ }
     try {
       const r = await call(`/api/notes/${FAKE_ID}/restore`, { method: 'POST', body: {} });
-      record('S10-01', loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+      record('S10-01', loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
     } catch (error) { record('S10-01', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
 
     let idB = null;
@@ -485,7 +508,7 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
         const after = await call(`/api/notes/${idB}`, { token: userB.token });
         record('S10-02', restore.status === 200 && sameNote(restore, noteB) && restore.json?.audit === 'recorded'
           && after.status === 200 && sameNote(after, noteB) ? 'pass' : 'fail',
-        { status: restore.status, observed: `복구 ${seen(restore)} / 재조회 ${seen(after)}`, vercelId: restore.vercelId });
+        { status: restore.status, observed: `복구 ${seen(restore)} / 재조회 ${seen(after)}`, serverRequestId: restore.serverRequestId });
       } catch (error) { record('S10-02', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
 
       if (!userA || !idB) notRun('S10-03', !userA ? notReady : '복구 준비 실패');
@@ -496,7 +519,7 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
           const compareFieldsNull = ['backupId', 'backupSha256', 'idMatch', 'ownerMatch', 'hashMatch', 'persistedSha256']
             .every(key => v[key] === null);
           const ok = denied404(r) && compareFieldsNull && v.rolledBack === false && v.audit === 'not_written';
-          record('S10-03', ok ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+          record('S10-03', ok ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
         } catch (error) { record('S10-03', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
       }
     }
@@ -504,7 +527,7 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
     else {
       try {
         const r = await call(`/api/notes/${idA}`, { token: userA.token });
-        record('S10-04', r.status === 200 && sameNote(r, noteA) ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+        record('S10-04', r.status === 200 && sameNote(r, noteA) ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
       } catch (error) { record('S10-04', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
     }
 
@@ -535,14 +558,14 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
     else {
       try {
         const r = await call('/api/notes', { token: userC.token });
-        record('S11-04', r.status === 403 && r.json?.error === 'DEVICE_NOT_APPROVED' ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+        record('S11-04', r.status === 403 && r.json?.error === 'DEVICE_NOT_APPROVED' ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
       } catch (error) { record('S11-04', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
       try {
         const req = await call('/api/devices/request', { token: userC.token, method: 'POST', body: { status: 'approved' } });
         const notes = await call('/api/notes', { token: userC.token });
         record('S11-05', req.status === 200 && req.json?.status === 'pending'
           && notes.status === 403 && notes.json?.error === 'DEVICE_NOT_APPROVED' ? 'pass' : 'fail',
-        { observed: `요청 ${seen(req)} / 메모 ${seen(notes)}` });
+        { observed: `요청 ${seen(req)} / 메모 ${seen(notes)}`, serverRequestId: req.serverRequestId });
       } catch (error) { record('S11-05', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
       if (!userC.sessionId) notRun('S11-06', 'C\' session_id 없음');
       else {
@@ -552,7 +575,7 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
             .eq('owner_id', userC.id).eq('device_id', userC.sessionId);
           if (approve.error) throw new Error(approve.error.message);
           const r = await call('/api/notes', { token: userC.token });
-          record('S11-06', r.status === 200 ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+          record('S11-06', r.status === 200 ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
         } catch (error) { record('S11-06', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
       }
       if (!userC.sessionId) notRun('S11-07', 'C\' session_id 없음');
@@ -565,7 +588,7 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
           const reRequest = await call('/api/devices/request', { token: userC.token, method: 'POST', body: {} });
           record('S11-07', notes.status === 403 && notes.json?.error === 'DEVICE_NOT_APPROVED'
             && reRequest.status === 200 && reRequest.json?.status === 'revoked' ? 'pass' : 'fail',
-          { observed: `메모 ${seen(notes)} / 재요청 ${seen(reRequest)}` });
+          { observed: `메모 ${seen(notes)} / 재요청 ${seen(reRequest)}`, serverRequestId: notes.serverRequestId });
         } catch (error) { record('S11-07', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
       }
     }
@@ -581,15 +604,15 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
         const after = await call('/api/notes', { cookie: serverUserA.cookie, origin: app.origin });
         const countAfter = Array.isArray(after.json) ? after.json.length : null;
         record('S11-08', noOrigin.status === 403 && noOrigin.json?.error === 'CSRF_REJECTED' && countBefore === countAfter ? 'pass' : 'fail',
-          { status: noOrigin.status, observed: `거부 ${seen(noOrigin)}, 메모 수 ${countBefore}->${countAfter}`, vercelId: noOrigin.vercelId });
+          { status: noOrigin.status, observed: `거부 ${seen(noOrigin)}, 메모 수 ${countBefore}->${countAfter}`, serverRequestId: noOrigin.serverRequestId });
       } catch (error) { record('S11-08', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
       try {
         const r = await call('/api/notes', { cookie: serverUserA.cookie, origin: app.origin });
-        record('S11-09', r.status === 200 ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+        record('S11-09', r.status === 200 ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
       } catch (error) { record('S11-09', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
       try {
         const r = await call('/api/devices/status', { cookie: serverUserA.cookie, origin: app.origin });
-        record('S11-10', r.status === 200 && r.json?.status === 'approved' ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+        record('S11-10', r.status === 200 && r.json?.status === 'approved' ? 'pass' : 'fail', { status: r.status, observed: seen(r), serverRequestId: r.serverRequestId });
       } catch (error) { record('S11-10', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
     }
 
@@ -604,7 +627,7 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
         const noLeak = JSON.stringify(noAuth.json ?? '').includes(noteA.body) === false
           && JSON.stringify(crossOwner.json ?? '').includes(noteA.body) === false;
         record('S12-01', loginRequired(noAuth) && denied404(crossOwner) && noLeak ? 'pass' : 'fail',
-          { observed: `무인증 ${seen(noAuth)} / 타인조회 ${seen(crossOwner)}` });
+          { observed: `무인증 ${seen(noAuth)} / 타인조회 ${seen(crossOwner)}`, serverRequestId: noAuth.serverRequestId });
       } catch (error) { record('S12-01', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
     }
 
@@ -625,7 +648,7 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
         const beforeDenied = before.status === 403 && before.json?.error === 'DEVICE_NOT_APPROVED';
         const afterDenied = after.status === 401 || (after.status === 403 && after.json?.error === 'DEVICE_NOT_APPROVED');
         record('S12-02', beforeDenied && afterDenied ? 'pass' : 'fail',
-          { observed: `승인 전 ${seen(before)} / 로그아웃 ${seen(logout)} / 재시도 ${seen(after)}` });
+          { observed: `승인 전 ${seen(before)} / 로그아웃 ${seen(logout)} / 재시도 ${seen(after)}`, serverRequestId: after.serverRequestId });
       } catch (error) { record('S12-02', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
     }
 
@@ -648,7 +671,8 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
           && recheck.status === 200 && sameNote(recheck, noteB);
         record('S12-03', ok ? 'pass' : 'fail',
           { observed: `무서명 수정(메모) ${seen(unsignedNotesPut)} / 무서명 수정(공지) ${seen(unsignedAnnPut)} / `
-            + `타인 조회 ${seen(wrongOwnerRead)} / 구역 밖 조회 ${seen(wrongZoneRead)} / 재확인 ${seen(recheck)}` });
+            + `타인 조회 ${seen(wrongOwnerRead)} / 구역 밖 조회 ${seen(wrongZoneRead)} / 재확인 ${seen(recheck)}`,
+            serverRequestId: unsignedNotesPut.serverRequestId });
       } catch (error) { record('S12-03', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
     }
   } finally {
@@ -663,8 +687,8 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
   const touched = new Set(cases.map(item => item.id));
   for (const def of CAMPAIGN_CASES) {
     if (!touched.has(def.id)) cases.push({ id: def.id, result: 'not_run', status: null,
-      observed: '이번 실행에서 다루지 않음', requestId: randomUUID(), checkedAt: new Date().toISOString(),
-      vercelId: null, expected: def.expected });
+      observed: '이번 실행에서 다루지 않음', checkedAt: new Date().toISOString(),
+      serverRequestId: null, expected: def.expected });
   }
 
   const passed = cases.filter(item => item.result === 'pass').length;

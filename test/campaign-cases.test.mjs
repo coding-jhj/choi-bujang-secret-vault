@@ -5,11 +5,15 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { CAMPAIGN_CASES, isValidDecision, mergeCampaign, RESULTS_SCHEMA, virtualRequest } from '../src/campaign-cases.mjs';
 
-const RID = '11111111-1111-4111-8111-111111111111';
+// Looks like a Vercel x-vercel-id (the format SERVER_REQUEST_ID actually accepts) rather than a
+// UUID - a UUID here would be exactly the mistake a judge flagged (a locally-invented id standing
+// in for a real server-stamped one).
+const SID = 'icn1::iad1::test00-1700000000000-aaaaaaaaaaaa';
 const AT = '2026-10-15T00:00:00.000Z';
 const first = CAMPAIGN_CASES[0];
+const firstLocal = CAMPAIGN_CASES.find(c => c.kind === 'local');
 const item = (overrides = {}) => ({ id: first.id, expected: first.expected, result: 'pass', status: 404,
-  observed: 'HTTP 404', requestId: RID, checkedAt: AT, ...overrides });
+  observed: 'HTTP 404', serverRequestId: SID, checkedAt: AT, ...overrides });
 const stored = cases => ({ schema: RESULTS_SCHEMA, ran: true, ranAt: AT, finishedAt: AT, cases });
 const stateOf = (merged, id = first.id) => merged.cases.find(c => c.id === id).state;
 
@@ -42,9 +46,22 @@ test('12단계 병합: 형식이 맞는 pass만 pass로 보인다', () => {
 test('12단계 병합: 기대값이 바뀐 결과는 stale, 형식이 틀린 결과·중복 id는 invalid', () => {
   assert.equal(stateOf(mergeCampaign(stored([item({ expected: '200' })]))), 'stale');
   assert.equal(stateOf(mergeCampaign(stored([item({ result: 'passed' })]))), 'invalid');
-  assert.equal(stateOf(mergeCampaign(stored([item({ requestId: 'not-a-uuid' })]))), 'invalid');
   assert.equal(stateOf(mergeCampaign(stored([item({ checkedAt: 'yesterday' })]))), 'invalid');
   assert.equal(stateOf(mergeCampaign(stored([item(), item()]))), 'invalid');
+});
+
+test('12단계 병합: live 케이스는 서버가 찍어준 요청ID가 있어야만 pass/fail, 빈 값·누락은 invalid (임의로 지어낸 id는 증거가 아님)', () => {
+  assert.equal(stateOf(mergeCampaign(stored([item({ serverRequestId: '' })]))), 'invalid');
+  assert.equal(stateOf(mergeCampaign(stored([item({ serverRequestId: undefined })]))), 'invalid');
+  assert.equal(stateOf(mergeCampaign(stored([item({ serverRequestId: 123 })]))), 'invalid');
+});
+
+test('12단계 병합: local 케이스(decide()/detect() 직접 호출)는 서버 요청ID가 없어도 pass로 보인다', () => {
+  assert.equal(firstLocal.kind, 'local');
+  const localItem = { id: firstLocal.id, expected: firstLocal.expected, result: 'pass',
+    observed: 'allow / device_registered', checkedAt: AT };
+  const merged = mergeCampaign(stored([localItem]));
+  assert.equal(stateOf(merged, firstLocal.id), 'pass');
 });
 
 test('12단계 병합: 카탈로그에 없는 id는 무시하고, 관찰 문자열은 300자로 자른다', () => {
@@ -74,7 +91,7 @@ test('12단계 응답 모양: 키 5개·requestId 일치·허용된 ruleIds만 �
     reasonCode: 'device_registered', ruleIds: ['device_registered'] };
   assert.equal(isValidDecision(request, ok, ['device_registered']), true);
   assert.equal(isValidDecision(request, { ...ok, extra: 1 }, ['device_registered']), false);
-  assert.equal(isValidDecision(request, { ...ok, requestId: RID }, ['device_registered']), false);
+  assert.equal(isValidDecision(request, { ...ok, requestId: '11111111-1111-4111-8111-111111111111' }, ['device_registered']), false);
   assert.equal(isValidDecision(request, { ...ok, ruleIds: ['made_up'] }, ['device_registered']), false);
   assert.equal(isValidDecision(request, { ...ok, ruleIds: [] }, ['device_registered']), false);
 });

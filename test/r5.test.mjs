@@ -1,14 +1,9 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { deploymentIdentity } from '../scripts/deployment-identity.mjs';
-import { runAttackChecks, NOT_RUN } from '../src/attack-check.mjs';
-
-// S12_BUNDLE_UNSUPPORTED: the judge's isolated environment can only send GET/HEAD. Every check
-// that would send a write request (POST/PUT) must never actually call fetch and must always
-// report NOT_RUN, regardless of what the (never-called) server would have answered.
-const WRITE_CHECK_IDS = ['no_login_create', 'no_login_restore', 'no_login_announcements_create',
-  'no_login_announcement_write', 'no_login_device_request', 'forged_token_device_request',
-  'original_api_no_key_write', 'login_bad_credentials'];
+import { runAttackChecks, CASE_BY_ATTACK_ID } from '../src/attack-check.mjs';
+import { CAMPAIGN_CASES, RESULTS_SCHEMA } from '../src/campaign-cases.mjs';
 
 const config = {
   step: 5,
@@ -47,69 +42,88 @@ test('build identity uses Vercel Git and deployment metadata', () => {
   assert.throws(() => deploymentIdentity(env, { ...config, originalApiUrl: 'https://abcdefgh.supabase.co/rest/v1/notes?select=*' }));
 });
 
-test('attack check records closed results only when requests are rejected as JSON', async () => {
-  const originalFetch = globalThis.fetch;
-  const calls = [];
-  const closed = async (url, init) => {
-    const path = new URL(String(url)).pathname;
-    calls.push([String(url), init?.redirect, init?.headers]);
-    if (path === '/data.json' || path === '/auth-config.json' || path === '/supabase.js') {
-      return new Response('Not Found', { status: 404 });
-    }
-    if (path === '/aleph.json') return new Response('{}', { status: 200 });
-    if (path === '/') return new Response('<html></html>', { status: 200, headers: { 'X-Content-Type-Options': 'nosniff' } });
-    return new Response(JSON.stringify({ error: 'LOGIN_REQUIRED' }), { status: 401 });
-  };
-  try {
-    globalThis.fetch = closed;
-    const results = await runAttackChecks(config);
-    assert.deepEqual(results.map(item => item.attackId), ['no_login_list', 'no_login_create',
-      'forged_token_list', 'no_login_item_read', 'no_login_restore', 'no_login_announcements_list',
-      'no_login_announcements_create', 'no_login_announcement_write',
-      'no_login_device_request', 'forged_token_device_request', 'no_login_device_status',
-      'original_api_no_key_read', 'original_api_no_key_write',
-      'public_files_no_key', 'login_bad_credentials', 'public_data_json_read',
-      'aleph_json_open', 'nosniff_header']);
-    for (const item of results) {
-      if (WRITE_CHECK_IDS.includes(item.attackId)) assert.equal(item.observed, NOT_RUN, item.attackId);
-      else assert.ok(/^(거부됨|열리지 않음|열림|헤더 있음|키 문자열 없음)/u.test(item.observed), item.attackId);
-    }
-    assert.ok(calls.every(([, redirect]) => redirect === 'error' || redirect === undefined));
-    // Only the (GET) no-key read probe touches the original Supabase host - the write probe
-    // (original_api_no_key_write) is a WRITE_CHECK_IDS entry and must never call fetch.
-    assert.ok(calls.some(([url]) => url.startsWith('https://abcdefgh.supabase.co/rest/v1/notes')));
-    assert.equal(calls.filter(([url]) => url.startsWith('https://abcdefgh.supabase.co')).length, 1);
-    assert.ok(calls.every(([url]) => !url.includes('/auth-config.json') || url.startsWith('https://student-defense')));
-    assert.ok(calls.filter(([url]) => url.startsWith('https://abcdefgh.supabase.co'))
-      .every(([, , headers]) => !headers?.apikey && !headers?.Authorization));
+// S12_SCREEN_MISMATCH: attack-check.mjs no longer sends its own requests. Every attackId must map
+// to a real src/campaign-cases.mjs catalog id; these fixtures look like what
+// scripts/campaign-retest.mjs actually writes.
+const AT = '2026-10-15T08:41:31.000Z';
+const expectedFor = caseId => CAMPAIGN_CASES.find(item => item.id === caseId).expected;
+const passEntry = (caseId, overrides = {}) => ({
+  id: caseId, result: 'pass', status: 401, observed: 'HTTP 401', requestId: randomUUID(),
+  checkedAt: AT, vercelId: 'icn1::test-1792053690000-abc123', expected: expectedFor(caseId), ...overrides,
+});
+const stored = cases => ({ schema: RESULTS_SCHEMA, ran: true, ranAt: AT, finishedAt: AT, cases });
 
-    globalThis.fetch = async () => new Response(JSON.stringify([{ id: 'x' }]), { status: 200 });
-    const open = await runAttackChecks(config);
-    const byId = Object.fromEntries(open.map(item => [item.attackId, item.observed]));
-    for (const id of ['no_login_list', 'no_login_create', 'forged_token_list', 'no_login_item_read',
-      'no_login_restore', 'no_login_announcements_list', 'no_login_announcements_create', 'no_login_announcement_write',
-      'no_login_device_request', 'forged_token_device_request', 'no_login_device_status',
-      'original_api_no_key_read', 'original_api_no_key_write', 'login_bad_credentials',
-      'public_data_json_read', 'nosniff_header']) {
-      assert.ok(!/^(거부됨|열리지 않음|헤더 있음)/u.test(byId[id]), id);
-    }
-    assert.ok(!byId.public_files_no_key.startsWith('키 문자열 없음'));
-    // Write checks report NOT_RUN unconditionally - never influenced by what the (unreached) server
-    // would have answered, even when that mock fetch would otherwise look like an open/vulnerable app.
-    for (const id of WRITE_CHECK_IDS) assert.equal(byId[id], NOT_RUN, id);
+test('attack check attackId 매핑은 전부 campaign-cases.mjs의 실제 항목을 가리킨다', () => {
+  assert.equal(Object.keys(CASE_BY_ATTACK_ID).length, 18);
+  for (const [attackId, caseId] of Object.entries(CASE_BY_ATTACK_ID)) {
+    assert.ok(CAMPAIGN_CASES.some(item => item.id === caseId), `${attackId} -> ${caseId}`);
+  }
+  // No two attackIds may silently share one piece of evidence.
+  assert.equal(new Set(Object.values(CASE_BY_ATTACK_ID)).size, 18);
+});
 
-    globalThis.fetch = async url => (new URL(String(url)).pathname === '/'
-      ? new Response('<script>var k="sb_publishable_abcdefghijklmnop"</script>', { status: 200 })
-      : new Response('Not Found', { status: 404 }));
-    const leaked = await runAttackChecks(config);
-    assert.match(leaked.find(item => item.attackId === 'public_files_no_key').observed, /^키로 보이는/u);
-    assert.ok(leaked.every(item => !JSON.stringify(item).includes('sb_publishable_')));
-  } finally {
-    globalThis.fetch = originalFetch;
+test('attack check reports the committed campaign-retest evidence, never a result it invented itself', async () => {
+  const allPass = stored(Object.values(CASE_BY_ATTACK_ID).map(caseId => passEntry(caseId)));
+  const results = await runAttackChecks(config, { stored: allPass });
+  assert.deepEqual(results.map(item => item.attackId), Object.keys(CASE_BY_ATTACK_ID));
+  for (const item of results) {
+    const caseId = CASE_BY_ATTACK_ID[item.attackId];
+    const entry = allPass.cases.find(c => c.id === caseId);
+    assert.ok(item.observed.startsWith('증거 확인됨'), item.attackId);
+    assert.ok(item.observed.includes(`HTTP ${entry.status}`), item.attackId);
+    assert.ok(item.observed.includes(entry.requestId), item.attackId);
+    assert.ok(item.observed.includes(entry.vercelId), item.attackId);
+    assert.equal(typeof item.expected, 'string');
+    assert.ok(item.expected.length > 0);
   }
 });
 
-test('attack check refuses an original API address outside the login issuer host', async () => {
-  await assert.rejects(runAttackChecks({ ...config, originalApiUrl: 'https://other.example.com/rest/v1/notes' }));
-  await assert.rejects(runAttackChecks({ ...config, originalApiUrl: 'https://abcdefgh.supabase.co/rest/v1/notes?select=*' }));
+test('campaign-retest를 아직 돌리지 않았으면 전부 정직하게 미실행이다 (가짜 통과 없음)', async () => {
+  // `stored: undefined` is intentionally excluded here: it is indistinguishable from omitting the
+  // second argument entirely (both read the real results file) - see the dedicated test below.
+  for (const absent of [null, { schema: RESULTS_SCHEMA, ran: false, cases: [] }]) {
+    const results = await runAttackChecks(config, { stored: absent });
+    assert.equal(results.length, 18);
+    assert.ok(results.every(item => item.observed.startsWith('미실행')));
+  }
+});
+
+test('campaign-retest가 일부만 다뤘으면 다룬 것만 통과로, 나머지는 미실행으로 남는다', async () => {
+  const partial = stored([passEntry('S03-01')]);
+  const results = await runAttackChecks(config, { stored: partial });
+  const byId = Object.fromEntries(results.map(item => [item.attackId, item.observed]));
+  assert.ok(byId.no_login_list.startsWith('증거 확인됨'));
+  for (const attackId of Object.keys(CASE_BY_ATTACK_ID)) {
+    if (attackId === 'no_login_list') continue;
+    assert.ok(byId[attackId].startsWith('미실행'), attackId);
+  }
+});
+
+test('저장된 기대값이 카탈로그와 다르면(stale) 또는 형식이 틀리면(invalid) 통과로 보이지 않는다', async () => {
+  const staleResults = await runAttackChecks(config, {
+    stored: stored([passEntry('S03-01', { expected: '다른 기대값' })]),
+  });
+  assert.ok(staleResults.find(item => item.attackId === 'no_login_list').observed.startsWith('stale'));
+
+  const invalidResults = await runAttackChecks(config, {
+    stored: stored([passEntry('S03-01', { requestId: 'not-a-uuid' })]),
+  });
+  assert.ok(invalidResults.find(item => item.attackId === 'no_login_list').observed.startsWith('invalid'));
+});
+
+test('5단계 미만에서는 구현을 요구하며 던진다', async () => {
+  await assert.rejects(runAttackChecks({ ...config, step: 4 }, { stored: null }));
+  await assert.rejects(runAttackChecks({ ...config, step: undefined }, { stored: null }));
+});
+
+test('results 파일이 없어도(첫 clone) 읽기를 시도만 하고 조용히 미실행으로 넘어간다', async () => {
+  // No `stored` override here: this exercises the real readFile(RESULTS_PATH) path. The repo's
+  // actual ops/campaign-retest-results.json may or may not exist/cover every case at test time;
+  // this only asserts the function never throws and always returns exactly 18 well-formed items.
+  const results = await runAttackChecks(config);
+  assert.equal(results.length, 18);
+  for (const item of results) {
+    assert.equal(typeof item.observed, 'string');
+    assert.ok(item.observed.length > 0);
+  }
 });

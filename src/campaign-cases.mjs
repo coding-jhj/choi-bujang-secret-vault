@@ -162,6 +162,7 @@ export const CAMPAIGN_CASES = Object.freeze([
   c('S08-03', 8, 'live', "B'가 A'의 공지 수정", "404 NOT_FOUND, A' 공지 그대로"),
   c('S08-04', 8, 'live', '로그인 없이 공지 목록', '401 LOGIN_REQUIRED'),
   c('S08-05', 8, 'live', '로그인 없이 공지 추가', '401 LOGIN_REQUIRED'),
+  c('S08-10', 8, 'live', '로그인 없이 공지 한 건 수정', '401 LOGIN_REQUIRED'),
   c('S08-06', 8, 'local', 'decide(): 공지 쓰기', 'deny / announcement_write_denied'),
   c('S08-07', 8, 'local', 'decide(): 메모 전체 목록', 'deny / notes_list_denied'),
   c('S08-08', 8, 'local', 'decide(): 메모 경로 모양으로 다른 구역 path', 'deny / zone_mismatch'),

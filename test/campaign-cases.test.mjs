@@ -13,11 +13,11 @@ const item = (overrides = {}) => ({ id: first.id, expected: first.expected, resu
 const stored = cases => ({ schema: RESULTS_SCHEMA, ran: true, ranAt: AT, finishedAt: AT, cases });
 const stateOf = (merged, id = first.id) => merged.cases.find(c => c.id === id).state;
 
-test('12단계 카탈로그: 57건(배포 대상 44 + 로컬 13), id는 겹치지 않는다', () => {
-  assert.equal(CAMPAIGN_CASES.length, 57);
-  assert.equal(CAMPAIGN_CASES.filter(c => c.kind === 'live').length, 44);
+test('12단계 카탈로그: 58건(배포 대상 45 + 로컬 13), id는 겹치지 않는다', () => {
+  assert.equal(CAMPAIGN_CASES.length, 58);
+  assert.equal(CAMPAIGN_CASES.filter(c => c.kind === 'live').length, 45);
   assert.equal(CAMPAIGN_CASES.filter(c => c.kind === 'local').length, 13);
-  assert.equal(new Set(CAMPAIGN_CASES.map(c => c.id)).size, 57);
+  assert.equal(new Set(CAMPAIGN_CASES.map(c => c.id)).size, 58);
   assert.ok(CAMPAIGN_CASES.every(c => /^S\d{2}-\d{2}$/u.test(c.id) && Number(c.id.slice(1, 3)) === c.step));
 });
 
@@ -26,7 +26,7 @@ test('12단계 병합: 저장된 결과가 없거나 실행 표시가 없으면 
     { schema: 'other', ran: true, cases: [item()] }, { schema: RESULTS_SCHEMA, ran: true, cases: 'x' }]) {
     const merged = mergeCampaign(input);
     assert.equal(merged.ran, false);
-    assert.equal(merged.counts.not_run, 57);
+    assert.equal(merged.counts.not_run, 58);
     assert.equal(merged.counts.pass, 0);
   }
 });
@@ -35,7 +35,7 @@ test('12단계 병합: 형식이 맞는 pass만 pass로 보인다', () => {
   const merged = mergeCampaign(stored([item()]));
   assert.equal(merged.ran, true);
   assert.equal(stateOf(merged), 'pass');
-  assert.deepEqual([merged.counts.pass, merged.counts.not_run], [1, 56]);
+  assert.deepEqual([merged.counts.pass, merged.counts.not_run], [1, 57]);
   assert.equal(stateOf(mergeCampaign(stored([item({ result: 'fail' })]))), 'fail');
 });
 
@@ -49,7 +49,7 @@ test('12단계 병합: 기대값이 바뀐 결과는 stale, 형식이 틀린 결
 
 test('12단계 병합: 카탈로그에 없는 id는 무시하고, 관찰 문자열은 300자로 자른다', () => {
   const merged = mergeCampaign(stored([item({ id: 'S99-99' }), item({ observed: 'x'.repeat(1000) })]));
-  assert.equal(merged.total, 57);
+  assert.equal(merged.total, 58);
   assert.ok(!merged.cases.some(c => c.id === 'S99-99'));
   assert.equal(merged.cases[0].observed.length, 300);
 });

@@ -457,6 +457,10 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
       const r = await call('/api/announcements', { method: 'POST', body: annA });
       record('S08-05', loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
     } catch (error) { record('S08-05', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
+    try {
+      const r = await call(`/api/announcements/${FAKE_ID}`, { method: 'PUT', body: { ...annA, body: '변조 시도' } });
+      record('S08-10', loginRequired(r) ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+    } catch (error) { record('S08-10', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
 
     // S10: restore, using B' (own note, tamper, restore) and A' (forbidden cross-restore).
     try {

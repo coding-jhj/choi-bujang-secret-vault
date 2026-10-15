@@ -34,9 +34,7 @@ export const CASE_BY_ATTACK_ID = Object.freeze({
   no_login_restore: 'S10-01',
   no_login_announcements_list: 'S08-04',
   no_login_announcements_create: 'S08-05',
-  no_login_announcement_write: 'S08-10',
   no_login_device_request: 'S11-01',
-  forged_token_device_request: 'S11-02',
   no_login_device_status: 'S11-03',
   original_api_no_key_read: 'S05-01',
   original_api_no_key_write: 'S05-02',
@@ -45,6 +43,10 @@ export const CASE_BY_ATTACK_ID = Object.freeze({
   public_data_json_read: 'S02-01',
   aleph_json_open: 'S02-02',
   nosniff_header: 'S02-03',
+  combined_no_login_and_cross_owner_read: 'S12-01',
+  combined_unapproved_then_revoked_session: 'S12-02',
+  combined_restore_then_unsigned_and_cross_zone: 'S12-03',
+  no_login_ops_summary: 'S12-06',
 });
 
 const EXPECTED = Object.freeze({
@@ -55,9 +57,7 @@ const EXPECTED = Object.freeze({
   no_login_restore: '로그인 없이 메모 복구 요청이 401/403과 JSON으로 거부됨',
   no_login_announcements_list: '로그인 없이 공지 목록 요청이 401/403과 JSON으로 거부됨',
   no_login_announcements_create: '로그인 없이 공지 추가가 401/403과 JSON으로 거부됨',
-  no_login_announcement_write: '로그인 없이 공지 한 건 수정이 401/403과 JSON으로 거부됨',
   no_login_device_request: '로그인 없이 승인 상태를 본문에 넣은 승인 요청이 401/403과 JSON으로 거부됨',
-  forged_token_device_request: '위조 토큰과 승인 상태를 본문에 넣은 승인 요청이 401/403과 JSON으로 거부됨',
   no_login_device_status: '로그인 없이 승인 상태 조회가 401/403과 JSON으로 거부됨',
   original_api_no_key_read: '키 없이 원본 DB 직접 조회가 401/403과 JSON으로 거부됨',
   original_api_no_key_write: '키 없이 원본 DB 직접 추가가 401/403과 JSON으로 거부됨',
@@ -66,6 +66,10 @@ const EXPECTED = Object.freeze({
   public_data_json_read: '/data.json이 열리지 않음',
   aleph_json_open: '/aleph.json이 열림',
   nosniff_header: '첫 화면 응답에 X-Content-Type-Options: nosniff가 있음',
+  combined_no_login_and_cross_owner_read: "로그인 없는 메모 목록 조회와 B'의 A' 메모 조회를 한꺼번에 보내도 각각 401/404로 거부되고 메모 내용이 응답에 없음",
+  combined_unapproved_then_revoked_session: '승인 전 세션 요청은 403, 로그아웃(회수)한 세션 토큰으로 재시도해도 401/403으로 거부됨',
+  combined_restore_then_unsigned_and_cross_zone: '메모 복구 뒤 서명 없는 수정과 다른 구역·다른 주인 조회를 한꺼번에 보내도 모두 거부되고 복구된 내용이 그대로 유지됨',
+  no_login_ops_summary: '로그인 없이 작전실 요약 조회가 401로 거부됨',
 });
 
 // Kept for backward compatibility with anything that still imports it; this file no longer

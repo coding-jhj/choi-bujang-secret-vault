@@ -56,12 +56,12 @@ const passEntry = (caseId, overrides = {}) => ({
 const stored = cases => ({ schema: RESULTS_SCHEMA, ran: true, ranAt: AT, finishedAt: AT, cases });
 
 test('attack check attackId 매핑은 전부 campaign-cases.mjs의 실제 항목을 가리킨다', () => {
-  assert.equal(Object.keys(CASE_BY_ATTACK_ID).length, 18);
+  assert.equal(Object.keys(CASE_BY_ATTACK_ID).length, 20);
   for (const [attackId, caseId] of Object.entries(CASE_BY_ATTACK_ID)) {
     assert.ok(CAMPAIGN_CASES.some(item => item.id === caseId), `${attackId} -> ${caseId}`);
   }
   // No two attackIds may silently share one piece of evidence.
-  assert.equal(new Set(Object.values(CASE_BY_ATTACK_ID)).size, 18);
+  assert.equal(new Set(Object.values(CASE_BY_ATTACK_ID)).size, 20);
 });
 
 test('attack check reports the committed campaign-retest evidence, never a result it invented itself', async () => {
@@ -88,7 +88,7 @@ test('campaign-retest를 아직 돌리지 않았으면 전부 정직하게 미�
   // second argument entirely (both read the real results file) - see the dedicated test below.
   for (const absent of [null, { schema: RESULTS_SCHEMA, ran: false, cases: [] }]) {
     const results = await runAttackChecks(config, { stored: absent });
-    assert.equal(results.length, 18);
+    assert.equal(results.length, 20);
     assert.ok(results.every(item => item.observed.startsWith('미실행')));
   }
 });
@@ -124,9 +124,9 @@ test('5단계 미만에서는 구현을 요구하며 던진다', async () => {
 test('results 파일이 없어도(첫 clone) 읽기를 시도만 하고 조용히 미실행으로 넘어간다', async () => {
   // No `stored` override here: this exercises the real readFile(RESULTS_PATH) path. The repo's
   // actual ops/campaign-retest-results.json may or may not exist/cover every case at test time;
-  // this only asserts the function never throws and always returns exactly 18 well-formed items.
+  // this only asserts the function never throws and always returns exactly 20 well-formed items.
   const results = await runAttackChecks(config);
-  assert.equal(results.length, 18);
+  assert.equal(results.length, 20);
   for (const item of results) {
     assert.equal(typeof item.observed, 'string');
     assert.ok(item.observed.length > 0);

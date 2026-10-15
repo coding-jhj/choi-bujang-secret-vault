@@ -25,11 +25,11 @@ test('12단계 카탈로그: 58건(배포 대상 45 + 로컬 13), id는 겹치�
   assert.ok(CAMPAIGN_CASES.every(c => /^S\d{2}-\d{2}$/u.test(c.id) && Number(c.id.slice(1, 3)) === c.step));
 });
 
-test('12단계 카탈로그: 18개 live 항목만 attackId를 갖고, src/attack-check.mjs와 1:1 대응한다', () => {
+test('12단계 카탈로그: 20개 live 항목만 attackId를 갖고, src/attack-check.mjs와 1:1 대응한다', () => {
   const withAttackId = CAMPAIGN_CASES.filter(c => c.attackId);
-  assert.equal(withAttackId.length, 18);
+  assert.equal(withAttackId.length, 20);
   assert.ok(withAttackId.every(c => c.kind === 'live'));
-  assert.equal(new Set(withAttackId.map(c => c.attackId)).size, 18);
+  assert.equal(new Set(withAttackId.map(c => c.attackId)).size, 20);
 });
 
 test('12단계 병합: attackId가 있는 카탈로그 항목은 병합 결과에도 그대로 나온다', () => {

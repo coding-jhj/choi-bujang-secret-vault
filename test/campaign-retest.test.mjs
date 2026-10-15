@@ -207,7 +207,7 @@ test('12단계 재시험 실행기: 전체 CAMPAIGN_CASES를 모두 다루고, �
     assert.equal(item.attackId, def.attackId ?? null, item.id);
   }
   const mapped = result.cases.filter(c => c.attackId);
-  assert.equal(mapped.length, 18, 'exactly the 18 attack-check.mjs-mapped cases carry an attackId');
+  assert.equal(mapped.length, 20, 'exactly the 20 attack-check.mjs-mapped cases carry an attackId');
 });
 
 test('12단계 재시험 실행기: 계정 준비가 실패하면 그 계정이 필요한 건들은 not_run이지 pass가 아니다', async () => {

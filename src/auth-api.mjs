@@ -1,6 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { REFRESH_COOKIE, clearedCookies, credentialFrom, isBrowserSafeWrite, isSameOrigin,
   readCookie, sessionCookies } from './session-cookie.mjs';
+import { createLoginVerifier } from './verify-login.mjs';
+import { createDeviceApprovalStore } from './device-approval.mjs';
 
 const MAX_EMAIL = 320;
 const MAX_SECRET = 256;
@@ -49,7 +51,12 @@ function sendCleared(response, status, body) {
 
 // newClient() must return a fresh Supabase client for every request: a client that
 // has signed a user in would otherwise send that user's token on later calls.
-export function createAuthApi({ newClient }) {
+// verify: the same login verifier the data routes use. devices: the step-11 approval store
+// (needs revoke). Both are required so logout can never silently skip revocation.
+export function createAuthApi({ newClient, verify, devices }) {
+  if (typeof verify !== 'function' || typeof devices?.revokeAllApproved !== 'function') {
+    throw new TypeError('logout_revocation_required');
+  }
   // Login carries no credential yet; a browser-marked request must still be same-origin
   // (login CSRF: a foreign page silently signing the victim in to the attacker's account).
   const login = async (request, response) => {
@@ -81,12 +88,33 @@ export function createAuthApi({ newClient }) {
   // Accepts the access token from the Bearer header or the cookie (same rule as the data APIs).
   // Every answer past the CSRF check clears both cookies, so the browser is signed out locally
   // even when the server-side sign-out fails.
+  //
+  // Step 12 (revoked-identity retry): ending the Supabase session alone is not enough. The data
+  // routes verify the access token with getClaims, which can check the signature locally (JWKS)
+  // without asking whether the session still exists, so a copied access token of a logged-out
+  // session would keep opening data until it expires. So logout ALSO revokes this session's
+  // device_approvals row, using the same verified (userId, sessionId) the device gate uses.
+  // The token is verified BEFORE signOut (after signOut a server-side check could no longer
+  // derive the session). Revocation is attempted first and signOut still runs if it fails; a
+  // failed revocation is reported (502), never answered as a clean logout.
   const logout = async (request, response) => {
     const credential = credentialFrom(request);
     if (credential.error) { send(response, 403, { error: credential.error }); return; }
     const match = BEARER.exec(credential.authorization ?? '');
     if (!match) { sendCleared(response, 401, { error: 'LOGIN_REQUIRED' }); return; }
+    let user = null;
+    try { user = await verify(credential.authorization); } catch { user = null; }
+    // signOut below uses the default 'global' scope (all of this owner's sessions end), so every
+    // approved session row of this owner is revoked, not only the current one.
+    let revoked = true;
+    if (user) {
+      try { await devices.revokeAllApproved(user.userId); } catch {
+        revoked = false;
+        console.error('logout: device approval revoke failed');
+      }
+    }
     const { error } = await newClient().auth.admin.signOut(match[1]);
+    if (!revoked) { sendCleared(response, 502, { error: 'LOGOUT_REVOKE_FAILED' }); return; }
     if (error) { sendCleared(response, 401, { error: 'LOGIN_REQUIRED' }); return; }
     sendCleared(response, 200, { ok: true });
   };
@@ -106,13 +134,15 @@ export function createAuthApi({ newClient }) {
   };
 }
 
-export function createRuntimeAuthApi(env = process.env) {
+export function createRuntimeAuthApi(config, env = process.env) {
   const url = env.SUPABASE_URL;
   const key = env.SUPABASE_SECRET_KEY;
   if (!url || !key) throw new Error('SERVER_NOT_CONFIGURED');
+  const options = { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } };
   return createAuthApi({
-    newClient: () => createClient(url, key, {
-      auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
-    }),
+    newClient: () => createClient(url, key, options),
+    verify: createLoginVerifier({ config, supabaseSecretKey: key }),
+    // A dedicated client that never signs anyone in, so it always acts with the server key.
+    devices: createDeviceApprovalStore(createClient(url, key, options)),
   });
 }

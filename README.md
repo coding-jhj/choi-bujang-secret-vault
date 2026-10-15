@@ -554,3 +554,94 @@ headless Chrome으로 실제 `public/index.html`을 진짜 로그인·메모·�
 **확인하지 못한 것:** 실제 Vercel 배포(HTTPS, `Host` 헤더), 실제 Supabase 토큰·갱신 토큰의 문자 범위, Safari·Firefox, 다른 `*.vercel.app` 형제 사이트에서의 실제 공격, 이번 보완에 대한 심판 채점. 위 결과는 모두 로컬 시험입니다.
 
 **다시 실행하는 방법:** `npm run test:auth`, `npm run test:cookie`, `npm run test:notes`, `npm run test:devices`, `npm run test:r5`, `npm run test:package`. 배포 뒤에는 브라우저 개발자 도구 → Application → Cookies에서 두 쿠키의 HttpOnly·Secure·SameSite를, Session Storage가 비어 있는지를 봅니다.
+
+## 12단계: 탈환 작전실과 총공세 재시험
+
+- **왜 (Equifax 2017).** 단계 카드의 Equifax 사고는 점검 결과만 믿은 사례입니다. 취약점 스캔은 고쳐야 할 Apache Struts 취약점을 찾지 못했습니다. 트래픽 검사 장비는 인증서가 약 10개월 전에 만료된 채 암호화 트래픽을 보지 못하고 있었습니다. 그 사이 76일 동안 유출이 탐지되지 않았습니다(공개 출처: 미국 GAO 보고서 GAO-18-559. 이번 세션에서 원문을 다시 열어 확인하지는 않았습니다). 교훈은 **"점검 결과는 그 점검이 실제로 동작한다는 것이 확인된 뒤에야 증거가 된다"**입니다.
+- **이 저장소에서 같은 일이 실제로 있었습니다: 로그아웃한 세션의 토큰.** 11단계까지의 로그아웃은 Supabase 세션만 끝냈고, 그 세션의 `device_approvals` 행은 `approved`로 남겨 두었습니다. 자료 경로는 토큰 서명을 확인한 뒤(`getClaims`는 JWKS로 로컬 검증하므로 세션이 끝났는지 묻지 않을 수 있음) 승인 행을 봅니다. 그래서 복사해 둔 접근 토큰이 만료될 때까지 계속 자료를 열 수 있었습니다. **11단계까지의 시험은 이 틈을 잡지 못했습니다.** 시험 65개 중 어느 것도 "로그아웃한 뒤 같은 토큰으로 다시 요청"을 해 보지 않았기 때문입니다. 모든 점검이 통과로 보였지만, 그 점검들은 이 경우를 보고 있지 않았습니다. Equifax의 꺼진 감시 장비와 같은 구조입니다.
+  - 고친 것 (`src/auth-api.mjs`, `src/device-approval.mjs`, `api/auth/[action].js`): 로그아웃은 먼저 토큰을 검증하고, 그 사용자의 `approved` 행을 **전부** `revoked`로 바꾼 뒤 세션을 끝냅니다. `signOut`의 기본 범위가 전체 세션(global)이므로 회수도 그 사용자 전체에 맞췄습니다. 회수가 실패하면 깨끗한 로그아웃(200)이라고 답하지 않고 502 `LOGOUT_REVOKE_FAILED`로 답합니다. 쿠키 삭제와 세션 종료는 그대로 합니다. 회수 수단 없이는 로그인 API를 만들 수 없습니다.
+  - 회귀 시험 `test/logout-revoke.test.mjs` 5개: 로그아웃 뒤 같은 토큰 → 403, 다른 세션의 승인도 함께 회수되고 다른 사용자·대기 행은 그대로, 회수 실패 → 502, SQL Editor 회수는 바로 다음 요청부터 적용(캐시 없음), 회수 수단 없는 생성 거부.
+  - **막지 못하는 것:** 로그아웃하지 않은 채 훔쳐 간 토큰은 만료 전까지 유효합니다. 이 경우는 SQL Editor에서 직접 회수해야 합니다.
+
+### 무엇을 만들었나
+
+- **`src/campaign-cases.mjs` — 재시험 카탈로그 57건.** 배포된 사이트에 보내는 `live` 44건과, 이 체크아웃의 `decide()`·`detect()`를 부르는 `local` 13건입니다. 모두 이 저장소의 2~11단계 기록과 `src/attack-check.mjs`에서 나왔고, 12단계 합성 3건과 작전실 경로 1건이 더해졌습니다. `mergeCampaign()`은 카탈로그와 저장된 결과 파일을 합칩니다. 규칙은 fail closed입니다. 결과가 없으면 `not_run`, 기대값이 바뀐 결과는 `stale`, 형식이 틀리거나 id가 중복되면 `invalid`입니다. **형식이 맞는 `pass`만 통과로 보입니다.** 결과가 빠졌다고 통과로 바뀌는 길은 없습니다.
+- **`GET /api/ops/summary` (`src/ops-api.mjs`, `api/ops/summary.js`)** — 순서는 다른 자료 경로와 같습니다: 로그인(401) → 방법(405) → 기기 승인(403). 응답의 각 칸은 둘 중 하나입니다.
+  - `live`: 이 요청 안에서 실제로 부른 결과입니다. `decide()`에 가상 요청 5건(허용·거부·재확인·구역 불일치·합성)을 보내 응답 모양(키 5개, requestId 일치, 허용된 ruleIds)과 결정을 대조하고, `detect()`에 30·120·121건 사건을 넣습니다. 내 계정의 승인 행 상태 수와 백업·복구 감사 행 수·최근 시각도 이 칸에서 셉니다.
+  - `stored`: 커밋된 `ops/campaign-retest-results.json`입니다. 실행 시각, 대상, 배포 커밋을 함께 보여 주고, 지금 배포와 같은 커밋인지 표시합니다.
+  - 어느 칸도 고정 문구 "정상"으로 대신하지 않습니다. 호출이 실패하면 `error`, 기대와 다르면 `mismatch`입니다. 숫자는 **검증된 본인(owner_id) 것만** 셉니다. 이 저장소와 판정 계약에는 역할(role)이 없으므로, 다른 사람의 자료는 개수조차 보여 주지 않습니다. 상태·시각 칸만 고르고, 메모 제목·내용·기기 번호·백업 id·owner id는 읽지도 보내지도 않습니다.
+- **`public/ops.html` — 탈환 작전실 화면.** `index.html`과 같은 모양이고, 쿠키 인증을 쓰며 토큰을 보관하지 않습니다. 401이면 갱신을 한 번 시도한 뒤 로그인 안내를, 403이면 승인 안내를 보여 줍니다. 판정기·탐지기 대조표, 승인 현황 수, 백업·복구 수, 재시험 57건 표(번호·종류·내용·기대·실제·확인 시각·상태)를 그립니다. 모든 값은 `textContent`로만 넣고, `innerHTML`·브라우저 저장소·`Authorization` 헤더는 쓰지 않습니다.
+- `aleph.config.json`: `allowedRoutes`에 `GET /api/ops/summary`를 넣었습니다. **`step`은 11 그대로입니다**(최종 검토 때 올림).
+
+### 학생이 만든 부분과 ALEPH SDP 엔진이 제공한 부분
+
+| 구분 | 무엇 | 근거 |
+|---|---|---|
+| ALEPH SDP 엔진·과정이 제공 | 판정 계약 `aleph.decision.v1`(요청 필드 18개, 응답 키 5개), `docs/DECIDER_REQUEST.md`·`docs/DETECT_EVENTS.md`, `aleph.config.json`의 모양, `scripts/bundle.mjs`, 심판 자체 | `src/decider.mjs` 첫 줄 주석("ALEPH SDP 엔진이 확인한 요청만 받는…"), `docs/DECIDER_REQUEST.md`의 `student-kit/sdp-core/decision-contract.mjs` 언급 |
+| 학생이 만든 부분 | `src/`의 보안 로직(로그인 검증, 소유자 검사, 판정 규칙, 탐지, 복구 대조·롤백·감사, 기기 승인, 쿠키·CSRF, 로그아웃 회수, 작전실), `api/` 경로, `supabase/` 표·RLS, `test/`, 재시험 도구 | 2~12단계 기록과 커밋 이력 |
+
+**정직하게 밝히는 한계:** "ALEPH SDP 엔진"이라는 이름은 이 저장소에서 위 두 곳에만 나옵니다. `student-kit/sdp-core/`는 이 저장소에 없어서 엔진이 실제로 무엇을 하는지 직접 읽지 못했습니다. 위 구분은 이 두 언급과 시작 틀의 구조에서 추론한 것입니다.
+
+### 57건과 심판의 "41종"은 같은 숫자가 아닙니다
+
+- 이 저장소에서 다시 돌릴 수 있는 것은 57건(배포 44 + 로컬 13)입니다. 심판의 41종 목록은 이 저장소에 없으므로 1:1로 대응시키지 않았습니다.
+- 심판 쪽에는 이 저장소가 흉내 낼 수 없는 것이 있을 것으로 봅니다(추론). 심판 자신의 서명 키로 만든 토큰(`aleph_run`, ES256)으로 보내는 요청이나, 엔진 중계를 거친 판정이 그런 예입니다. 이 저장소는 그 키를 가지지 않으며, 가져서도 안 됩니다. 반대로 로컬 13건은 배포된 앱이 부르지 않는 체크아웃의 `decide()`·`detect()`를 시험하므로 심판 항목과 겹치지 않을 수 있습니다.
+- 따라서 "57건 통과"를 "41종 통과"로 읽으면 안 됩니다.
+
+### 설치·실행·중지·복구 순서
+
+1. 설치: `npm ci` (Node 22 이상).
+2. 로컬 빌드: `npm run build -- --local` (`public/`만 씀).
+3. 배포: 커밋을 push하면 Vercel이 배포합니다. 환경 변수는 5단계 이후와 같습니다(`SUPABASE_URL`, `SUPABASE_SECRET_KEY`).
+4. 재시험 실행: `scripts/campaign-retest.mjs`가 `scripts/post-restore-retest.mjs`와 같은 방식(서비스 역할 키로 임시 계정 생성·실행·삭제)으로 57건(44건 실제 배포 호출 + 13건 로컬 `decide()`/`detect()`)을 돌립니다.
+   ```powershell
+   $env:SUPABASE_URL="https://<project>.supabase.co"; $env:SUPABASE_SECRET_KEY="<secret>"
+   node scripts/campaign-retest.mjs
+   Remove-Item Env:SUPABASE_SECRET_KEY
+   ```
+   결과는 `ops/campaign-retest-results.json`에 저장되고(커밋 대상), 실행한 적 없는 건은 계속 "실행 안 함"으로 남습니다 — 이 스크립트를 돌리기 전까지는 작전실에 57건 전부 "실행 안 함"이 정직한 표시입니다. 10단계 복구만 필요하면 `node scripts/post-restore-retest.mjs`를 따로 씁니다(10단계 보완 5 참고).
+5. 화면 확인: 배포 주소의 `/ops.html`에 로그인한 브라우저로 들어갑니다. 승인된 세션이어야 합니다.
+6. 기기 승인·회수: SQL Editor에서 합니다. `supabase/schema-device-approvals.sql` 끝의 주석을 따르세요(11단계 "무엇을 만들었나" 참고).
+7. 복구: `POST /api/notes/:id/restore`를 쓰고, 백업 행을 수동으로 만드는 SQL은 `supabase/schema-notes-backup.sql`에 있습니다(10단계 참고).
+8. 중지·되돌리기: 작전실은 읽기 전용이라 멈출 상태가 없습니다. 화면을 빼려면 `public/ops.html`, `api/ops/summary.js`, `allowedRoutes`의 한 줄을 지웁니다. 로그아웃 회수를 되돌리는 일은 권하지 않습니다(위 틈이 다시 열림).
+
+### 확인한 것 (이번 작업에서 실제로 실행한 결과)
+
+검증 기준 커밋: `a1e784673a0ca5266a61b775513b82a6715ae38a` 위의 커밋하지 않은 작업 트리입니다.
+
+```
+node --test "test/*.test.mjs" → tests 85, pass 85, fail 0
+  (시작 시 65/65 + test/ops-api.test.mjs 10 + test/campaign-cases.test.mjs 8 + test/campaign-retest.test.mjs 2)
+npm run build -- --local → 성공
+뮤테이션 6개 → 전부 잡아냄. 원래 코드로 되돌린 뒤 sha256 동일 확인
+  판정기 오류 분기 삭제(모양 틀린 출력도 ok)   → ops-api 1개 실패
+  승인 현황을 owner_id 없이 셈                  → ops-api 1개 실패
+  작전실의 기기 승인 관문 삭제                  → ops-api 1개 실패
+  기대값 바뀐 결과를 stale로 두지 않음          → campaign-cases 1개 실패
+  중복 id를 invalid로 두지 않음                 → campaign-cases 1개 실패
+  ran 표시를 느슨하게(ran !== undefined)        → campaign-cases 1개 실패
+public/ops.html 인라인 스크립트 node --check 통과, innerHTML·저장소·Authorization 0건
+```
+
+### `scripts/campaign-retest.mjs`에 대해 추가로 확인한 것
+
+`test/campaign-retest.test.mjs`는 실제 네트워크 없이, 요청 흐름을 그대로 흉내 내는 가짜 서버 하나로 57건 전체를 돌려 검증합니다.
+```
+node --test test/campaign-retest.test.mjs → 2개 모두 통과
+  - 57건 전부 다뤄지고, 다루지 않은 건은 "실행 안 함"으로만 남는다 (임의 통과 없음)
+  - 계정 준비가 실패하면 그 계정이 필요한 건은 전부 "실행 안 함" (가짜 통과 아님)
+뮤테이션 2개
+  announcements 표를 정리 대상에서 뺌 → 바로 잡아냄, 원래대로 복원 확인(sha256 동일)
+  다루지 않은 건을 "실행 안 함" 대신 "통과"로 채움 → 못 잡아냄(아래 공백 참고), 원래대로 복원 확인
+```
+이 작성 과정에서 테스트가 실제 버그 두 개를 먼저 잡아냈습니다: `S11-01`이 두 번 기록되던 것, `decide()`가 비동기 함수인데 `await`를 빼먹어 모든 로컬 판정기 케이스가 실패로 나오던 것. 둘 다 고쳤습니다.
+
+**알려진 테스트 공백:** "이 실행에서 다루지 않은 케이스는 실행 안 함으로 채운다"는 안전망 코드 한 줄은 못 잡아냅니다 — 이 테스트의 가짜 서버가 57건을 전부 처리하기 때문에 그 경로 자체가 실행되지 않습니다. 실제 배포에서 계정 준비 실패 등으로 중간에 멈추는 경우를 대비한 방어 코드이고, 평소 실행에서는 거치지 않습니다.
+
+### 확인하지 못한 것
+
+- `public/ops.html`을 실제 브라우저로 열어 보지 않았습니다(문법 검사만 함). 실제 배포·실제 Supabase에서 `/api/ops/summary`를 부른 적도 없습니다.
+- `scripts/campaign-retest.mjs`를 실제 배포·실제 Supabase에 대고 돌려 보지 않았습니다. 가짜 서버로만 검증했습니다.
+- 로그아웃 회수는 로컬 가짜 저장소로만 시험했습니다. 실제 Supabase에서 회수 뒤 403이 되는지는 배포 뒤 직접 확인해야 합니다. 이번 단계에 대한 심판 채점도 없습니다.
+
+**다시 실행하는 방법:** `node --test "test/*.test.mjs"`, `npm run build -- --local`.

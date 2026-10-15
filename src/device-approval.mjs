@@ -123,6 +123,15 @@ export function createDeviceApprovalStore(client) {
           { onConflict: 'owner_id,device_id', ignoreDuplicates: true }));
       return status(ownerId, sessionId);
     },
+    // Step 12 (logout): mark every 'approved' row of this owner 'revoked'. Logout ends ALL of the
+    // owner's Supabase sessions (admin.signOut default scope 'global'), so every approved session
+    // of that owner is revoked too. No matching row means the UPDATE touches nothing, which is not
+    // an error. Because the gate requires exactly 'approved' and request() never touches an
+    // existing row, a revoked session can never open data again, even with an unexpired token.
+    async revokeAllApproved(ownerId) {
+      check(await client.from('device_approvals').update({ status: 'revoked' })
+        .eq('owner_id', ownerId).eq('status', 'approved'));
+    },
   };
 }
 

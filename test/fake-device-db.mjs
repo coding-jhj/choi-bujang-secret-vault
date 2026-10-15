@@ -21,6 +21,10 @@ export function fakeDeviceDb({ fail = false } = {}) {
       const exec = mode => {
         calls.push({ op, payload, options, filters: [...filters] });
         if (fail) return { data: null, error: { message: 'down' } };
+        if (op === 'update') {
+          for (const row of rows.filter(r => filters.every(([k, v]) => r[k] === v))) Object.assign(row, payload);
+          return { data: null, error: null };
+        }
         if (op === 'upsert') {
           const keys = options?.onConflict?.split(',') ?? [];
           const clash = rows.find(r => keys.every(k => r[k] === payload[k]));
@@ -36,6 +40,7 @@ export function fakeDeviceDb({ fail = false } = {}) {
       const q = {
         select(c) { cols = c; return q; },
         upsert(p, o) { op = 'upsert'; payload = { ...p }; options = o; return q; },
+        update(p) { op = 'update'; payload = { ...p }; return q; },
         eq(k, v) { filters.push([k, v]); return q; },
         maybeSingle: async () => exec('maybe'),
         then(resolve, reject) { return Promise.resolve(exec('many')).then(resolve, reject); },

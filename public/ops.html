@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BYTE BACK | 탈환 작전실</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#101a28">
+  <link rel="icon" href="/icon-192.png" type="image/png">
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    body { margin: 0; min-height: 100vh; background: #101a28; color: #ecf4ff; }
+    main { max-width: 960px; margin: 0 auto; padding: 44px 22px 64px; }
+    .eyebrow { color: #8ad8df; font-size: 14px; font-weight: 700; letter-spacing: .08em; }
+    h1 { margin: 16px 0; font-size: clamp(30px, 7vw, 48px); line-height: 1.2; }
+    h2 { font-size: 21px; margin: 0 0 6px; }
+    p { font-size: 17px; line-height: 1.7; color: #bfd0e5; }
+    button { font: inherit; padding: 11px 13px; border-radius: 10px; cursor: pointer; color: #ecf4ff;
+      background: #1f6f78; border: 1px solid #3aa6b3; }
+    a { color: #8ad8df; }
+    .status { min-height: 24px; color: #ffd9a0; }
+    .notice { font-size: 14px; color: #8fa6bf; }
+    section.card { border: 1px solid #51667c; border-radius: 14px; padding: 17px 19px; background: #1a2a3d; margin: 16px 0; }
+    .meta { font-size: 14px; color: #8fa6bf; margin: 0 0 10px; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 7px 8px; border-top: 1px solid #2c3f55; vertical-align: top; }
+    th { color: #8fa6bf; font-weight: 600; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 13px; font-weight: 700; }
+    .ok, .pass { background: #1d5a3a; color: #c8f5d9; }
+    .mismatch, .fail, .error, .invalid { background: #6b2430; color: #ffd6dc; }
+    .not_run, .stale { background: #5a4a1d; color: #ffeec2; }
+    .counts { display: flex; flex-wrap: wrap; gap: 10px; }
+    .counts div { border: 1px solid #2c3f55; border-radius: 10px; padding: 8px 12px; min-width: 92px; }
+    .counts b { display: block; font-size: 22px; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="eyebrow">BYTE BACK · 12단계 탈환 작전실</div>
+    <h1>탈환 작전실</h1>
+    <p class="status" id="status" role="status" aria-live="polite">불러오는 중입니다…</p>
+    <p class="notice">아래 값은 두 종류뿐입니다. <b>실시간</b>은 이 화면을 연 요청 안에서 서버가 방금 판정기·탐지기·DB를 직접 불러 얻은 값이고,
+      <b>저장됨</b>은 학생이 직접 돌린 재시험 결과 파일입니다. 결과가 없는 항목은 "실행 안 함"으로 보이며, 통과로 바뀌지 않습니다.
+      메모 내용과 기기 번호는 이 화면에 나오지 않습니다.</p>
+    <p id="login-needed" hidden>로그인이 필요합니다. <a href="/">자료실</a>에서 로그인한 뒤 다시 열어 주세요.</p>
+    <p id="device-needed" hidden>이 로그인 세션은 아직 승인되지 않았거나 회수되었습니다. <a href="/">자료실</a>에서 승인 상태를 확인해 주세요.</p>
+
+    <div id="board" hidden>
+      <p class="meta" id="generated"></p>
+      <button type="button" id="reload">다시 불러오기</button>
+
+      <section class="card" aria-labelledby="decider-title">
+        <h2 id="decider-title">판정기 decide() 실시간 확인 <span id="decider-badge" class="badge"></span></h2>
+        <p class="meta" id="decider-meta"></p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>가상 요청</th><th>기대</th><th>실제 출력</th><th>requestId</th><th>결과</th></tr></thead>
+          <tbody id="decider-rows"></tbody>
+        </table></div>
+      </section>
+
+      <section class="card" aria-labelledby="detect-title">
+        <h2 id="detect-title">탐지기 detect() 실시간 확인 <span id="detect-badge" class="badge"></span></h2>
+        <p class="meta" id="detect-meta"></p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>가상 사건</th><th>건수</th><th>기대</th><th>실제 출력</th><th>결과</th></tr></thead>
+          <tbody id="detect-rows"></tbody>
+        </table></div>
+      </section>
+
+      <section class="card" aria-labelledby="devices-title">
+        <h2 id="devices-title">내 로그인 세션 승인 현황 <span id="devices-badge" class="badge"></span></h2>
+        <p class="meta" id="devices-meta"></p>
+        <div class="counts" id="devices-counts"></div>
+      </section>
+
+      <section class="card" aria-labelledby="restore-title">
+        <h2 id="restore-title">내 백업·복구 기록 <span id="restore-badge" class="badge"></span></h2>
+        <p class="meta" id="restore-meta"></p>
+        <div class="counts" id="restore-counts"></div>
+      </section>
+
+      <section class="card" aria-labelledby="campaign-title">
+        <h2 id="campaign-title">총공세 재시험 결과 (저장됨)</h2>
+        <p class="meta" id="campaign-meta"></p>
+        <div class="counts" id="campaign-counts"></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>번호</th><th>종류</th><th>확인 내용</th><th>기대</th><th>실제</th><th>확인 시각</th><th>상태</th></tr></thead>
+          <tbody id="campaign-rows"></tbody>
+        </table></div>
+      </section>
+    </div>
+  </main>
+  <script type="module">
+    // 이 화면은 토큰을 만들거나 보관하지 않습니다(11단계와 같음). 브라우저가 같은 출처 요청에 httpOnly 쿠키를 붙이고,
+    // 서버가 로그인 → 기기 승인 순서로 확인한 뒤에만 요약을 돌려줍니다. 모든 값은 textContent로만 넣습니다.
+    const $ = id => document.getElementById(id);
+    const STATE = { ok: '정상', mismatch: '기대와 다름', error: '오류', pass: '통과', fail: '실패',
+      not_run: '실행 안 함', stale: '기대값 바뀜', invalid: '형식 오류' };
+    const KIND = { live: '배포', local: '로컬' };
+    const time = value => (value ? new Date(value).toLocaleString('ko-KR') : '없음');
+    const el = (tag, text, className) => {
+      const node = document.createElement(tag);
+      if (text !== undefined && text !== null) node.textContent = String(text);
+      if (className) node.className = className;
+      return node;
+    };
+    const badge = state => el('span', STATE[state] ?? '알 수 없음', `badge ${STATE[state] ? state : 'error'}`);
+    const row = cells => {
+      const tr = document.createElement('tr');
+      for (const cell of cells) {
+        const td = document.createElement('td');
+        if (cell instanceof Node) td.append(cell); else td.textContent = cell ?? '';
+        tr.append(td);
+      }
+      return tr;
+    };
+    const setBadge = (id, state) => { $(id).replaceWith(Object.assign(badge(state), { id })); };
+    const counts = (id, pairs) => $(id).replaceChildren(...pairs.map(([label, value]) => {
+      const box = el('div');
+      box.append(el('b', value ?? '-'), el('span', label));
+      return box;
+    }));
+    const decision = value => (value ? `${value.decision} / ${value.reasonCode}` : '없음 (출력 모양 틀림 또는 오류)');
+    const detection = value => (value ? [value.action, value.reasonCode].filter(Boolean).join(' / ') : '없음 (오류)');
+
+    function renderDecider(section) {
+      setBadge('decider-badge', section.status);
+      $('decider-meta').textContent = `실시간 · ${time(section.checkedAt)} · ruleIds: ${(section.ruleIds ?? []).join(', ') || '없음'}`
+        + (section.error ? ` · ${section.error}` : '');
+      $('decider-rows').replaceChildren(...(section.probes ?? []).map(p => row([p.label, decision(p.expected),
+        decision(p.actual), p.requestId, badge(p.matches ? 'pass' : 'fail')])));
+    }
+
+    function renderDetect(section) {
+      setBadge('detect-badge', section.status);
+      $('detect-meta').textContent = `실시간 · ${time(section.checkedAt)}` + (section.error ? ` · ${section.error}` : '');
+      $('detect-rows').replaceChildren(...(section.probes ?? []).map(p => row([p.label, p.eventCount,
+        detection(p.expected), detection(p.actual), badge(p.matches ? 'pass' : 'fail')])));
+    }
+
+    function renderDevices(section) {
+      setBadge('devices-badge', section.status);
+      $('devices-meta').textContent = section.status === 'ok'
+        ? `실시간 · ${time(section.checkedAt)} · 내 계정의 세션만 셉니다. 이 요청의 세션은 방금 승인 관문을 통과했습니다.`
+        : `실시간 조회 실패 · ${section.error ?? ''}`;
+      const c = section.counts ?? {};
+      counts('devices-counts', section.status === 'ok'
+        ? [['승인됨', c.approved], ['대기', c.pending], ['회수됨', c.revoked], ['기타 값', c.other], ['전체', section.total]] : []);
+    }
+
+    function renderRestore(section) {
+      setBadge('restore-badge', section.status);
+      $('restore-meta').textContent = section.status === 'ok'
+        ? `실시간 · ${time(section.checkedAt)} · 내 계정 것만. 마지막 백업 ${time(section.backups?.latestAt)}, 마지막 복구 ${time(section.restores?.latestAt)}`
+        : `실시간 조회 실패 · ${section.error ?? ''}`;
+      counts('restore-counts', section.status === 'ok'
+        ? [['백업 행', section.backups?.count], ['복구 감사 기록', section.restores?.count]] : []);
+    }
+
+    function renderCampaign(section) {
+      const target = section.target ?? {};
+      const same = section.sameDeployment === true ? '지금 배포와 같은 커밋'
+        : section.sameDeployment === false ? '지금 배포와 다른 커밋 (다시 돌려야 함)' : '지금 배포와 비교할 수 없음';
+      $('campaign-meta').textContent = section.ran
+        ? `저장됨 · 실행 ${time(section.ranAt)} ~ ${time(section.finishedAt)} · 대상 ${target.appOrigin ?? '?'} · `
+          + `배포 커밋 ${target.deployedCommit?.slice(0, 12) ?? '?'} · ${same} · 정리 ${section.cleanupOk === true ? '완료' : section.cleanupOk === false ? '일부 실패' : '알 수 없음'}`
+        : '저장됨 · 재시험을 아직 한 번도 돌리지 않았습니다. 아래 모든 항목은 "실행 안 함"입니다.';
+      const c = section.counts ?? {};
+      counts('campaign-counts', [['통과', c.pass], ['실패', c.fail], ['실행 안 함', c.not_run],
+        ['기대값 바뀜', c.stale], ['형식 오류', c.invalid], ['전체', section.total]]);
+      $('campaign-rows').replaceChildren(...(section.cases ?? []).map(item => row([item.id, KIND[item.kind] ?? item.kind,
+        item.title, item.expected, item.observed ?? (item.status ? `HTTP ${item.status}` : '-'),
+        time(item.checkedAt), badge(item.state)])));
+    }
+
+    async function refresh() {
+      try {
+        const response = await fetch('/api/auth/refresh', { method: 'POST', cache: 'no-store', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        return response.ok;
+      } catch { return false; }
+    }
+
+    async function load() {
+      $('status').textContent = '불러오는 중입니다…';
+      $('login-needed').hidden = $('device-needed').hidden = true;
+      try {
+        const ask = () => fetch('/api/ops/summary', { cache: 'no-store', credentials: 'same-origin' });
+        let response = await ask();
+        if (response.status === 401 && await refresh()) response = await ask();
+        if (response.status === 401) { $('board').hidden = true; $('login-needed').hidden = false; $('status').textContent = ''; return; }
+        if (response.status === 403) { $('board').hidden = true; $('device-needed').hidden = false; $('status').textContent = ''; return; }
+        if (!response.ok) throw new Error();
+        const data = await response.json();
+        $('generated').textContent = `요약 생성 ${time(data.generatedAt)}`;
+        renderDecider(data.decider ?? {});
+        renderDetect(data.detect ?? {});
+        renderDevices(data.devices ?? {});
+        renderRestore(data.restore ?? {});
+        renderCampaign(data.campaign ?? {});
+        $('board').hidden = false;
+        $('status').textContent = '';
+      } catch {
+        $('board').hidden = true;
+        $('status').textContent = '작전실 요약을 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.';
+      }
+    }
+
+    $('reload').addEventListener('click', load);
+    load();
+  </script>
+</body>
+</html>

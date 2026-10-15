@@ -1,0 +1,6 @@
+{
+  "schema": "byteback.campaign-retest.v1",
+  "ran": false,
+  "note": "No retest has been run yet. scripts/campaign-retest.mjs overwrites this file with real results.",
+  "cases": []
+}

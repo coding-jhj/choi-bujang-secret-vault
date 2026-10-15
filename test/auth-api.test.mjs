@@ -3,6 +3,8 @@ import { test } from 'node:test';
 import { createAuthApi } from '../src/auth-api.mjs';
 
 const JWT = 'aaaaaaaaaa.bbbbbbbbbb.cccccccccc';
+// Logout revocation deps (step 12). Unknown tokens verify to null, so nothing is revoked here.
+const deps = { verify: async () => null, devices: { revokeAllApproved: async () => {} } };
 const goodSession = { access_token: JWT, refresh_token: 'refresh-token-1', expires_at: 1900000000,
   user: { id: 'u-1', email: 'a@example.test' } };
 
@@ -46,7 +48,7 @@ function call(handler, { method = 'POST', action, body, authorization, headers: 
 // 11단계 보완 2 (S11_KEY_EXPOSED): 토큰은 본문이 아니라 httpOnly 쿠키로만 간다.
 test('로그인: 토큰은 httpOnly·Secure·SameSite=Strict 쿠키로만 주고 본문에는 이메일·만료만 둔다', async () => {
   const log = [];
-  const handler = createAuthApi({ newClient: () => fakeClient(log) });
+  const handler = createAuthApi({ ...deps, newClient: () => fakeClient(log) });
   const ok = await call(handler, { action: 'login', headers: SAME,
     body: { email: 'a@example.test', password: 'right' } });
   assert.equal(ok.status, 200);
@@ -66,7 +68,7 @@ test('로그인: 토큰은 httpOnly·Secure·SameSite=Strict 쿠키로만 주고
 
 test('로그인: 다른 출처 페이지가 보낸 로그인은 403이고 Supabase를 부르지 않는다 (login CSRF)', async () => {
   const log = [];
-  const handler = createAuthApi({ newClient: () => fakeClient(log) });
+  const handler = createAuthApi({ ...deps, newClient: () => fakeClient(log) });
   const good = { email: 'a@example.test', password: 'right' };
   for (const headers of [CROSS, { host: HOST, origin: 'null' }, { ...SAME, 'sec-fetch-site': 'same-site' },
     { host: HOST, 'sec-fetch-site': 'cross-site' }]) {
@@ -80,7 +82,7 @@ test('로그인: 다른 출처 페이지가 보낸 로그인은 403이고 Supaba
 });
 
 test('로그인: 형식이 틀린 본문·메서드·경로는 거부한다', async () => {
-  const handler = createAuthApi({ newClient: () => fakeClient([]) });
+  const handler = createAuthApi({ ...deps, newClient: () => fakeClient([]) });
   for (const body of [undefined, {}, { email: 1, password: 'x' }, { email: 'a@example.test', password: '' },
     { email: 'a@example.test', password: 'x'.repeat(257) }, '[]', 'not json']) {
     const result = await call(handler, { action: 'login', body });
@@ -94,7 +96,7 @@ test('로그인: 형식이 틀린 본문·메서드·경로는 거부한다', as
 
 test('로그인 요청마다 새 클라이언트를 쓴다', async () => {
   let made = 0;
-  const handler = createAuthApi({ newClient: () => { made += 1; return fakeClient([]); } });
+  const handler = createAuthApi({ ...deps, newClient: () => { made += 1; return fakeClient([]); } });
   await call(handler, { action: 'login', body: { email: 'a@example.test', password: 'right' } });
   await call(handler, { action: 'login', body: { email: 'a@example.test', password: 'right' } });
   assert.equal(made, 2);
@@ -107,7 +109,7 @@ const CLEARED = [
 
 test('갱신: 갱신 쿠키만 읽고(본문 무시) 같은 출처일 때만 두 쿠키를 새로 심는다', async () => {
   const log = [];
-  const handler = createAuthApi({ newClient: () => fakeClient(log) });
+  const handler = createAuthApi({ ...deps, newClient: () => fakeClient(log) });
   const ok = await call(handler, { action: 'refresh', headers: { ...SAME, cookie: `${AT}; ${RT}` } });
   assert.deepEqual([ok.status, ok.body], [200, { expiresAt: 1900000000, email: 'a@example.test' }]);
   assert.equal(ok.headers.get('set-cookie').length, 2);
@@ -132,7 +134,7 @@ test('갱신: 갱신 쿠키만 읽고(본문 무시) 같은 출처일 때만 두
 
 test('로그아웃: 쿠키 또는 Bearer로 세션을 끝내고 두 쿠키를 만료시킨다', async () => {
   const log = [];
-  const handler = createAuthApi({ newClient: () => fakeClient(log) });
+  const handler = createAuthApi({ ...deps, newClient: () => fakeClient(log) });
   const viaCookie = await call(handler, { action: 'logout', headers: { ...SAME, cookie: `${AT}; ${RT}` } });
   assert.deepEqual([viaCookie.status, viaCookie.body], [200, { ok: true }]);
   assert.deepEqual(viaCookie.headers.get('set-cookie'), CLEARED);
@@ -149,7 +151,7 @@ test('로그아웃: 쿠키 또는 Bearer로 세션을 끝내고 두 쿠키를 �
 
 test('로그아웃: 다른 출처에서 쿠키로 온 요청은 403이고 세션도 쿠키도 건드리지 않는다', async () => {
   const log = [];
-  const handler = createAuthApi({ newClient: () => fakeClient(log) });
+  const handler = createAuthApi({ ...deps, newClient: () => fakeClient(log) });
   for (const headers of [{ ...CROSS, cookie: AT }, { host: HOST, cookie: AT }]) {
     const denied = await call(handler, { action: 'logout', headers });
     assert.deepEqual([denied.status, denied.body], [403, { error: 'CSRF_REJECTED' }]);
@@ -159,7 +161,7 @@ test('로그아웃: 다른 출처에서 쿠키로 온 요청은 403이고 세션
 });
 
 test('Supabase 오류가 터져도 내부 문구 없이 502로 답한다', async () => {
-  const handler = createAuthApi({ newClient: () => ({ auth: { async signInWithPassword() { throw new Error('secret detail'); } } }) });
+  const handler = createAuthApi({ ...deps, newClient: () => ({ auth: { async signInWithPassword() { throw new Error('secret detail'); } } }) });
   const result = await call(handler, { action: 'login', body: { email: 'a@example.test', password: 'x' } });
   assert.deepEqual([result.status, result.body], [502, { error: 'AUTH_UNAVAILABLE' }]);
 });

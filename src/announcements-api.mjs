@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { createLoginVerifier } from './verify-login.mjs';
+import { credentialFrom } from './session-cookie.mjs';
 import { assertDeviceStore, createDeviceApprovalStore, requireApprovedDevice } from './device-approval.mjs';
 
 // Announcements API. Parallel sibling of notes-api.mjs (kept separate on purpose; notes-api.mjs is untouched).
@@ -46,8 +47,12 @@ function readBody(request) {
 export function createAnnouncementsApi({ verify, store, devices }) {
   assertDeviceStore(devices);
   async function guard(request, response, allowed) {
+    // Bearer header (non-browser clients) or the httpOnly session cookie (browser); see
+    // src/session-cookie.mjs. A cookie-authenticated unsafe request from another origin stops here.
+    const credential = credentialFrom(request);
+    if (credential.error) { send(response, 403, { error: credential.error }); return null; }
     let user = null;
-    try { user = await verify(request.headers?.authorization); } catch { user = null; }
+    try { user = await verify(credential.authorization); } catch { user = null; }
     if (!user) { send(response, 401, { error: 'LOGIN_REQUIRED' }); return null; }
     if (!allowed.includes(request.method)) {
       response.setHeader('Allow', allowed.join(', '));

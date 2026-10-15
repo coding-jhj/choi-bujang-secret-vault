@@ -13,7 +13,8 @@
     "detect:test": "node scripts/detect-test.mjs",
     "fixture:7": "node scripts/fixture-7.mjs",
     "xdr:run": "node scripts/xdr-run.mjs",
-    "test:auth": "node --test test/auth-api.test.mjs"
+    "test:auth": "node --test test/auth-api.test.mjs",
+    "test:cookie": "node --test test/session-cookie.test.mjs"
   },
   "engines": {
     "node": ">=22"

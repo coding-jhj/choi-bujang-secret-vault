@@ -67,44 +67,33 @@
   <script type="module">
     const $ = id => document.getElementById(id);
     const status = message => { $('status').textContent = message || ''; };
-    const KEEP = 'byteback.session';
-    let session = null;
+    let signedIn = false;
     let editingId = null;
 
-    // 11단계 승인: 화면은 기기를 가리키는 값을 만들거나 저장하거나 보내지 않습니다. 서버가 이미 보내는
-    // 로그인 토큰을 검증한 뒤 그 안의 세션 번호로 승인 여부를 정합니다. "앱으로 설치됨·standalone 실행"은
-    // 어디에서도 신뢰 신호로 쓰지 않습니다.
+    // 11단계: 화면은 로그인 자격 증명도, 기기를 가리키는 값도 만들거나 보관하거나 직접 보내지 않습니다.
+    // 서버가 로그인 때 httpOnly 쿠키를 심고, 브라우저가 같은 출처 요청에만 그 쿠키를 붙입니다. 이 스크립트는
+    // 쿠키를 읽을 수 없고 브라우저 저장소도 쓰지 않습니다. 서버가 쿠키 속 토큰을 검증한 뒤 그 안의 세션 번호로
+    // 승인 여부를 정합니다. "앱으로 설치됨·standalone 실행"은 어디에서도 신뢰 신호로 쓰지 않습니다.
     const DEVICE_LABEL = { pending: '승인 대기 중', approved: '승인됨', revoked: '회수됨', unknown: '아직 요청하지 않음' };
 
-    const saved = () => { try { return JSON.parse(sessionStorage.getItem(KEEP)); } catch { return null; } };
-    const keep = value => {
-      try {
-        if (value) sessionStorage.setItem(KEEP, JSON.stringify(value)); else sessionStorage.removeItem(KEEP);
-      } catch { /* 저장소를 쓸 수 없어도 화면은 동작합니다 */ }
-    };
-
-    async function post(path, body, token) {
-      const headers = { 'Content-Type': 'application/json' };
-      if (token) headers.Authorization = `Bearer ${token}`;
-      return fetch(path, { method: 'POST', cache: 'no-store', headers, body: JSON.stringify(body ?? {}) });
+    async function post(path, body) {
+      return fetch(path, {
+        method: 'POST', cache: 'no-store', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}),
+      });
     }
 
+    // 갱신 쿠키는 /api/auth 경로에만 붙습니다. 본문은 비어 있고 서버가 쿠키를 읽어 두 쿠키를 새로 심습니다.
     async function refresh() {
-      if (!session?.refreshToken) return false;
-      try {
-        const response = await post('/api/auth/refresh', { refreshToken: session.refreshToken });
-        if (!response.ok) return false;
-        session = await response.json();
-        keep(session);
-        return true;
-      } catch { return false; }
+      try { return (await post('/api/auth/refresh')).ok; } catch { return false; }
     }
 
     async function api(path, options = {}, retry = true) {
       const response = await fetch(path, {
         ...options,
         cache: 'no-store',
-        headers: { Authorization: `Bearer ${session?.accessToken}`, 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
       });
       if (response.status === 401) {
         if (retry && await refresh()) return api(path, options, false);
@@ -174,7 +163,7 @@
       $('app').hidden = true;
       $('notes').replaceChildren();
       resetEditor();
-      $('device').hidden = !session;
+      $('device').hidden = !signedIn;
       $('device-state').textContent = DEVICE_LABEL[state] ?? DEVICE_LABEL.unknown;
       // 요청 버튼은 아직 요청하지 않은 기기에만 보입니다(대기·회수 상태는 다시 요청해도 바뀌지 않음).
       $('device-request').hidden = state !== 'unknown';
@@ -199,18 +188,30 @@
       }
     }
 
-    function show(next) {
-      session = next;
-      keep(next);
-      $('login').hidden = !!next;
+    // user: { email } 또는 null. 이메일은 로그인 직후 응답에서만 알 수 있고 어디에도 보관하지 않으므로,
+    // 새로고침 뒤에는 이메일 대신 고정 문구를 보여 줍니다.
+    function show(user) {
+      signedIn = !!user;
+      $('login').hidden = signedIn;
       $('app').hidden = true;
       $('device').hidden = true;
       $('notes').replaceChildren();
       resetEditor();
-      if (next) {
-        $('who').textContent = next.email ?? '';
+      if (user) {
+        $('who').textContent = user.email || '이 브라우저 세션';
         run(checkDevice);
       }
+    }
+
+    // 첫 화면: 스크립트는 httpOnly 쿠키를 볼 수 없으므로 서버에 로그인 상태를 묻습니다.
+    // 401이면 한 번 갱신을 시도하고, 그래도 안 되면 로그인 화면을 보여 줍니다(오류 문구 없이).
+    async function resume() {
+      try {
+        const ask = () => fetch('/api/devices/status', { cache: 'no-store', credentials: 'same-origin' });
+        let response = await ask();
+        if (response.status === 401 && await refresh()) response = await ask();
+        show(response.status === 401 ? null : { email: '' });
+      } catch { show(null); }
     }
 
     $('login').addEventListener('submit', event => {
@@ -223,10 +224,11 @@
         show(await response.json());
       });
     });
+    // 서버가 세션을 끝내고 두 쿠키를 만료시킵니다(스크립트는 httpOnly 쿠키를 직접 지울 수 없음).
+    // 요청이 실패해도 화면은 로그인 화면으로 돌아갑니다.
     $('logout').addEventListener('click', () => run(async () => {
-      const token = session?.accessToken;
+      await post('/api/auth/logout').catch(() => {});
       show(null);
-      if (token) await post('/api/auth/logout', {}, token).catch(() => {});
     }));
     $('device-request').addEventListener('click', () => run(async () => {
       // 본문은 비어 있습니다. 서버가 토큰의 세션 번호로 pending 행을 만듭니다.
@@ -247,7 +249,7 @@
         await load();
       });
     });
-    show(saved());
+    resume();
   </script>
 </body>
 </html>

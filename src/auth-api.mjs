@@ -1,4 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
+import { REFRESH_COOKIE, clearedCookies, credentialFrom, isBrowserSafeWrite, isSameOrigin,
+  readCookie, sessionCookies } from './session-cookie.mjs';
 
 const MAX_EMAIL = 320;
 const MAX_SECRET = 256;
@@ -20,21 +22,38 @@ function readJson(request) {
 
 const text = (value, max) => typeof value === 'string' && value.length > 0 && value.length <= max;
 
-// 브라우저에는 토큰과 이메일만 돌려준다. 사용자 ID·원본 응답 전체는 내보내지 않는다.
+// 11단계 보완 2: 토큰은 응답 본문에 넣지 않고 httpOnly 쿠키로만 보낸다(src/session-cookie.mjs).
+// 본문에는 화면 표시용 이메일과 만료 시각만 둔다. 사용자 ID·원본 응답 전체는 내보내지 않는다.
 function toSession(session) {
   if (!text(session?.access_token, MAX_TOKEN) || !text(session?.refresh_token, MAX_TOKEN)) return null;
+  const cookies = sessionCookies({ accessToken: session.access_token, refreshToken: session.refresh_token });
+  if (!cookies) return null;
   return {
-    accessToken: session.access_token,
-    refreshToken: session.refresh_token,
-    expiresAt: Number.isSafeInteger(session.expires_at) ? session.expires_at : null,
-    email: typeof session.user?.email === 'string' ? session.user.email : '',
+    cookies,
+    body: {
+      expiresAt: Number.isSafeInteger(session.expires_at) ? session.expires_at : null,
+      email: typeof session.user?.email === 'string' ? session.user.email : '',
+    },
   };
+}
+
+function sendSession(response, session) {
+  response.setHeader('Set-Cookie', session.cookies);
+  send(response, 200, session.body);
+}
+
+function sendCleared(response, status, body) {
+  response.setHeader('Set-Cookie', clearedCookies());
+  send(response, status, body);
 }
 
 // newClient() must return a fresh Supabase client for every request: a client that
 // has signed a user in would otherwise send that user's token on later calls.
 export function createAuthApi({ newClient }) {
+  // Login carries no credential yet; a browser-marked request must still be same-origin
+  // (login CSRF: a foreign page silently signing the victim in to the attacker's account).
   const login = async (request, response) => {
+    if (!isBrowserSafeWrite(request)) { send(response, 403, { error: 'CSRF_REJECTED' }); return; }
     const input = readJson(request);
     if (!input || !text(input.email, MAX_EMAIL) || !text(input.password, MAX_SECRET)) {
       send(response, 400, { error: 'INVALID_LOGIN' });
@@ -44,28 +63,32 @@ export function createAuthApi({ newClient }) {
       { email: input.email, password: input.password });
     const session = error ? null : toSession(data?.session);
     if (!session) { send(response, 401, { error: 'LOGIN_FAILED' }); return; }
-    send(response, 200, session);
+    sendSession(response, session);
   };
 
+  // The refresh token is read ONLY from its httpOnly cookie (never from the body), and the
+  // request must be same-origin because that cookie is ambient. Failure clears both cookies.
   const refresh = async (request, response) => {
-    const input = readJson(request);
-    if (!input || !text(input.refreshToken, MAX_TOKEN)) {
-      send(response, 400, { error: 'INVALID_LOGIN' });
-      return;
-    }
-    const { data, error } = await newClient().auth.refreshSession(
-      { refresh_token: input.refreshToken });
+    const token = readCookie(request, REFRESH_COOKIE);
+    if (!token) { sendCleared(response, 401, { error: 'LOGIN_REQUIRED' }); return; }
+    if (!isSameOrigin(request)) { send(response, 403, { error: 'CSRF_REJECTED' }); return; }
+    const { data, error } = await newClient().auth.refreshSession({ refresh_token: token });
     const session = error ? null : toSession(data?.session);
-    if (!session) { send(response, 401, { error: 'LOGIN_REQUIRED' }); return; }
-    send(response, 200, session);
+    if (!session) { sendCleared(response, 401, { error: 'LOGIN_REQUIRED' }); return; }
+    sendSession(response, session);
   };
 
+  // Accepts the access token from the Bearer header or the cookie (same rule as the data APIs).
+  // Every answer past the CSRF check clears both cookies, so the browser is signed out locally
+  // even when the server-side sign-out fails.
   const logout = async (request, response) => {
-    const match = BEARER.exec(request.headers?.authorization ?? '');
-    if (!match) { send(response, 401, { error: 'LOGIN_REQUIRED' }); return; }
+    const credential = credentialFrom(request);
+    if (credential.error) { send(response, 403, { error: credential.error }); return; }
+    const match = BEARER.exec(credential.authorization ?? '');
+    if (!match) { sendCleared(response, 401, { error: 'LOGIN_REQUIRED' }); return; }
     const { error } = await newClient().auth.admin.signOut(match[1]);
-    if (error) { send(response, 401, { error: 'LOGIN_REQUIRED' }); return; }
-    send(response, 200, { ok: true });
+    if (error) { sendCleared(response, 401, { error: 'LOGIN_REQUIRED' }); return; }
+    sendCleared(response, 200, { ok: true });
   };
 
   const actions = { login, refresh, logout };

@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { createLoginVerifier } from './verify-login.mjs';
+import { credentialFrom } from './session-cookie.mjs';
 
 // Step 11: device (login session) approval.
 //
@@ -65,8 +66,12 @@ export function createDevicesApi({ verify, devices }) {
     throw new TypeError('device_store_required');
   }
   async function guard(request, response, allowed) {
+    // Bearer header (non-browser clients) or the httpOnly session cookie (browser); see
+    // src/session-cookie.mjs. A cookie-authenticated unsafe request from another origin stops here.
+    const credential = credentialFrom(request);
+    if (credential.error) { send(response, 403, { error: credential.error }); return null; }
     let user = null;
-    try { user = await verify(request.headers?.authorization); } catch { user = null; }
+    try { user = await verify(credential.authorization); } catch { user = null; }
     if (!user) { send(response, 401, { error: 'LOGIN_REQUIRED' }); return null; }
     if (request.method !== allowed) {
       response.setHeader('Allow', allowed);

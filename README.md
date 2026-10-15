@@ -66,7 +66,7 @@
 
 - 브라우저는 Supabase를 직접 부르지 않습니다. 메모 읽기·추가·수정·삭제는 이미 `/api/notes` 서버 함수만 거치고, 5단계에서 로그인도 서버 함수 `/api/auth/login`·`/api/auth/refresh`·`/api/auth/logout`(`api/auth/[action].js`, 로직은 `src/auth-api.mjs`)로 옮겼습니다. 로그인 요청마다 새 서버 클라이언트를 만들고, 브라우저에는 토큰과 이메일만 돌려줍니다.
 - 그래서 화면 파일에서 Supabase 공개 키와 SDK를 없앴습니다. `public/auth-config.json`을 삭제했고, `npm run build`는 더 이상 `public/supabase.js`를 만들지 않습니다. 키는 Vercel 환경변수(`SUPABASE_URL`, `SUPABASE_SECRET_KEY`)로 서버 함수만 읽습니다.
-- 화면은 로그인 결과(토큰)를 그 탭의 `sessionStorage`에 두고 `Authorization: Bearer`로 `/api/notes`를 부릅니다. 401이면 한 번 갱신을 시도하고, 실패하면 로그인 화면으로 돌아갑니다. 서버의 로그인 확인과 소유자 검사(4단계)는 그대로입니다.
+- (11단계 보완에서 httpOnly 쿠키로 바꿨습니다.) 5단계 당시 화면은 로그인 결과(토큰)를 그 탭의 `sessionStorage`에 두고 `Authorization: Bearer`로 `/api/notes`를 불렀습니다. 401이면 한 번 갱신을 시도하고, 실패하면 로그인 화면으로 돌아갑니다. 서버의 로그인 확인과 소유자 검사(4단계)는 그대로입니다.
 - 원본 자료 API: `aleph.config.json`의 `originalApiUrl`에 `…/rest/v1/notes`(질의 없는 HTTPS 경로)를 적었고, 빌드가 만드는 배포 식별 파일 `/aleph.json`에도 같은 값(`originalApiUrl`)과 허용 경로(`allowedRoutes`)를 넣습니다. 심판은 배포된 `/aleph.json`을 읽기 때문입니다.
 - 마지막 방어선: `supabase/revoke-stage5.sql`이 `public.notes`에서 `public`·`anon`·`authenticated`의 직접 권한을 모두 회수합니다. 점검 SQL은 `supabase/revoke-stage5-check.sql`(읽기만 함)이며 적용 전·후에 실행해 비교합니다. 이 SQL은 학생이 학습용 Supabase SQL Editor에서 직접 실행합니다(이 저장소 작업에서는 실행하지 않았습니다).
 - 시험: `npm run test:auth`(로그인 서버 함수), `npm run test:r5`, `npm run test:notes`, `npm run test:package`.
@@ -445,7 +445,7 @@
 ### 한계
 
 - **승인된 세션이 실행 중인 기기가 뚫리면 막지 못합니다.** 키로거나 XSS로 그 세션의 토큰을 훔치면 세션 번호도 함께 따라갑니다. LastPass 사고가 바로 승인된 직원 기기가 뚫린 경우였으므로, 이 단계만으로 그 사고를 막았다고 말하지 않습니다. 이번 단계가 막는 것은 둘입니다. 하나는 새 로그인 세션이 승인 없이 자료를 여는 것이고, 다른 하나는 복사해 간 기기 키로 계속 "승인된 기기"로 인정받는 것입니다.
-- **로그인 토큰은 여전히 브라우저 `sessionStorage`(`byteback.session`)에 있습니다.** 3단계 이후 그대로이며, 이번 수정은 기기 값만 없앴습니다. 카드 문장 "기기 키나 토큰은 브라우저 저장소에 넣지 않습니다"의 "토큰"까지 심판이 이 저장소를 문제 삼을지는 **알 수 없습니다.**
+- ~~로그인 토큰은 여전히 브라우저 `sessionStorage`(`byteback.session`)에 있습니다.~~ 심판이 바로 이 점을 문제 삼았고, 아래 "보완: 로그인 토큰도 브라우저 저장소에서 뺌"에서 httpOnly 쿠키로 바꿨습니다.
 - 세션이 유지되는 동안 같은 세션 번호를 쓴다는 것(토큰 갱신 뒤에도 같음, 새 로그인이면 바뀜)은 Supabase Auth의 문서화된 동작과 설치된 라이브러리 타입에 근거한 것입니다. 실제 계정으로 갱신·재로그인해 확인하지는 않았습니다.
 - 승인 요청 경로에는 횟수 제한이 없습니다. 다만 한 세션은 행 하나만 만들 수 있습니다.
 - 심판 계정도 같은 관문을 거칩니다. 심판이 정상 확인용 요청을 승인된 세션 없이 보내면 그 결과가 403으로 바뀔 위험이 있으며, 확인되지 않았습니다.
@@ -479,3 +479,78 @@ headless Chrome으로 `public/index.html`을 가짜 API 서버에 띄워 화면 
 실제 Supabase에서 세션 번호의 동작, 실제 배포, 실제 계정 두 개로 한 시험, 이번 수정에 대한 심판 채점은 하지 않았습니다. 위 결과는 모두 로컬 시험입니다.
 
 **다시 실행하는 방법:** `npm run test:notes`, `npm run test:devices`, `npm run test:r5`, `npm run test:package`, `npm run test:auth`, `npm run decider:test`, `npm run detect:test`.
+
+### 보완: 로그인 토큰도 브라우저 저장소에서 뺌 (S11_KEY_EXPOSED 2차)
+
+- **심판 결과.** 기기 번호를 없앤 커밋 `a015e40`도 50/100, 이유 코드 `S11_KEY_EXPOSED`, "기기 키 저장" 조건 실패였습니다. 심판이 적은 이유 그대로: "`public/index.html`에서 `sessionStorage`에 저장하는 `session` 객체에 토큰이 포함됩니다. 토큰을 브라우저 저장소에 기록하지 않도록 저장·복원 방식을 고치세요." 위 "한계"에 "알 수 없다"고 적어 둔 위험이 실제 실패 원인으로 확인된 것입니다.
+- **왜 httpOnly 쿠키인가.** 토큰을 브라우저 저장소에서 지우기만 하면 새로고침할 때마다 다시 로그인해야 합니다. 대신 서버가 로그인 응답에서 토큰을 `Set-Cookie`로 심고, 응답 본문에는 토큰을 넣지 않습니다. `HttpOnly` 쿠키는 페이지 스크립트가 읽을 수 없으므로(`document.cookie`에도 안 보임), 화면 코드는 토큰을 만지지도 저장하지도 못합니다. 브라우저가 같은 출처 요청에만 쿠키를 붙이고, 서버만 그 값을 읽습니다.
+
+**쿠키 (`src/session-cookie.mjs`)**
+
+| 쿠키 | 담는 것 | 속성 | 이유 |
+|---|---|---|---|
+| `__Host-byteback_at` | 접근 토큰(JWT) | `Path=/; HttpOnly; Secure; SameSite=Strict` | 모든 `/api/*`가 받아야 함. `__Host-` 접두사는 이 출처가 HTTPS로, `Domain` 없이, `Path=/`로 심은 쿠키만 브라우저가 받게 해서 다른 `*.vercel.app` 사이트가 덮어쓰거나 심을 수 없음 |
+| `__Secure-byteback_rt` | 갱신 토큰 | `Path=/api/auth; HttpOnly; Secure; SameSite=Strict` | 갱신 토큰은 `/api/auth/*`에만 붙고 자료 경로에는 아예 가지 않음 |
+
+- 둘 다 `Max-Age`가 없는 세션 쿠키입니다. 브라우저 세션이 끝나면 사라지고, 디스크에 오래 남는 자격 증명이 되지 않습니다(브라우저 프로필 복사로 계속 "승인된 세션"이 되는 위험을 줄임).
+- 로그인·갱신 응답 본문은 `{ email, expiresAt }`뿐입니다. 갱신은 **쿠키만** 읽고 본문의 `refreshToken`은 무시합니다. 로그아웃은 Supabase 세션을 끝내고 같은 이름·경로·속성에 `Max-Age=0`과 과거 `Expires`를 붙여 두 쿠키를 지웁니다. 갱신·로그아웃이 실패해도 쿠키를 지웁니다.
+- 쿠키 값은 RFC 6265가 허용하는 문자(공백·`"`·`,`·`;`·`\`·제어 문자 제외)만 받습니다. 다른 문자가 섞인 토큰은 쿠키로 심지 않고 로그인 실패로 처리합니다(헤더 주입 방지). 같은 이름 쿠키가 두 번 오면 둘 다 믿지 않습니다.
+
+**`Authorization: Bearer`는 서버에 남겼습니다 (판단, 검토 필요)**
+
+- 심판은 자기 서명 토큰을 `Authorization: Bearer`로 보냅니다(`src/verify-login.mjs`의 심판 발급자 분기, `src/attack-check.mjs`의 위조 토큰 점검). 서버가 쿠키만 받게 하면 심판의 모든 정상·공격 요청이 401이 되어 채점 자체가 깨집니다. 그래서 **화면은 쿠키만, 브라우저가 아닌 클라이언트(심판·`scripts/post-restore-retest.mjs`·curl)는 헤더**를 씁니다.
+- 한 요청에 두 신원이 섞이지 않게: `Authorization` 헤더가 있으면 그것만 쓰고 쿠키는 보지 않습니다. 헤더가 틀려도 쿠키로 넘어가지 않고 401입니다.
+- 두 길 모두 끝에서 같은 `Bearer <jwt>` 문자열이 되어 바뀌지 않은 `src/verify-login.mjs`로 갑니다. 그래서 사용자 ID와 세션 번호(`session_id`, 기기 승인 관문의 열쇠)는 이전과 똑같이 검증된 토큰에서만 나옵니다. 실제 검증기로 쿠키 요청이 승인 전 403·승인 후 200·재로그인 403이 되는 것을 시험으로 확인했습니다.
+
+**CSRF 판단**
+
+- 헤더와 달리 쿠키는 브라우저가 자동으로 붙이므로, 다른 사이트의 페이지가 로그인한 사용자의 브라우저를 시켜 메모 추가·삭제·복구·승인 요청을 보내게 하는 CSRF가 새로 생깁니다.
+- `SameSite=Strict`가 1차 방어입니다. `vercel.app`은 공개 접미사 목록(Public Suffix List)에 있어서 다른 `*.vercel.app` 앱도 "다른 사이트"로 취급되므로 쿠키가 붙지 않습니다.
+- 그래도 **서버 쪽 확인을 하나 더 넣었습니다.** 공개 저장소·실제 배포라 공격면이 실제로 있고, SameSite는 브라우저 구현에 맡기는 방어이기 때문입니다. 쿠키로 인증한 요청이 GET/HEAD/OPTIONS가 아니면 `Origin`이 이 호스트의 출처와 정확히 같아야 하고, 브라우저가 `Sec-Fetch-Site`를 보냈다면 `same-origin`이어야 합니다. 아니면 로그인 검증 전에 403 `CSRF_REJECTED`로 끝나고 저장소를 부르지 않습니다. 메모·공지·복구·기기 승인·갱신·로그아웃 모두 같은 규칙입니다.
+- 로그인 경로는 쿠키가 없어도 확인합니다(남의 계정으로 몰래 로그인시키는 login CSRF). 다만 `Origin`도 `Sec-Fetch-Site`도 없는 요청은 브라우저가 아닌 도구(피해자 쿠키를 쓸 수 없음)이므로 허용합니다. `attack-check`의 틀린 로그인 점검이 이 경우입니다.
+- 별도 CSRF 토큰은 넣지 않았습니다. 같은 출처 SPA에서 `Origin` 확인과 SameSite=Strict를 함께 쓰면 OWASP가 권하는 방어 수준이고, 토큰을 쓰려면 그 토큰을 또 화면 어딘가에 보관해야 하기 때문입니다.
+
+**화면 (`public/index.html`)**
+
+- `sessionStorage`·`localStorage`를 전혀 쓰지 않고, `Authorization` 헤더도 만들지 않습니다. 모든 요청은 `credentials: 'same-origin'`입니다.
+- 첫 화면은 저장된 값을 읽는 대신 `GET /api/devices/status`(이미 있는 경로)를 부릅니다. 401이면 갱신을 한 번 시도하고, 그래도 401이면 오류 문구 없이 로그인 화면을 보여 줍니다. 401 → 갱신 → 한 번 재시도 흐름은 그대로입니다.
+- 이메일은 로그인 직후 응답에서만 알 수 있고 어디에도 보관하지 않으므로, 새로고침 뒤에는 "이 브라우저 세션"이라고 보입니다.
+
+**`scripts/post-restore-retest.mjs`는 바꾸지 않았습니다.** 이 도구는 `/api/auth/login`을 쓰지 않고 Supabase에서 직접 로그인해 받은 토큰을 `Authorization: Bearer`로 보냅니다(`makeUser`, `call`). 서버가 Bearer를 계속 받으므로 영향이 없고, `npm run test:notes`의 재시험 도구 시험 4개가 그대로 통과합니다. 실제 배포에 대고 다시 실행하지는 않았습니다.
+
+**이 보완이 막지 못하는 것**
+
+- 화면에 XSS가 생기면 공격 스크립트는 토큰을 **훔치지는** 못하지만, 그 페이지 안에서 쿠키가 붙은 요청을 **보낼** 수는 있습니다. httpOnly는 유출을 막을 뿐 사용을 막지 않습니다.
+- `sessionStorage`는 탭마다 따로였지만 쿠키는 같은 브라우저의 모든 탭이 공유하고, 브라우저를 닫을 때까지 남습니다("이전 세션 복원" 설정이면 더 오래 남을 수 있음).
+- `Origin` 확인은 요청의 `Host` 헤더와 비교합니다. Vercel이 `Host`를 배포 도메인 그대로 넘긴다는 것은 Node 요청 처리 방식에 근거한 추론이며 실제 배포에서는 확인하지 않았습니다. 만약 다르면 같은 출처 쓰기 요청이 403이 되므로 **배포 뒤 메모 추가를 반드시 직접 확인**해야 합니다.
+- 옛 커밋과 옛 배포의 화면 코드에는 `sessionStorage` 방식이 그대로 남아 있습니다.
+
+**확인한 것 (이번 보완에서 실제로 실행한 결과)**
+
+```
+npm run test:auth    → tests 8,  pass 8,  fail 0   (로그인 쿠키·본문, login CSRF, 갱신, 로그아웃)
+npm run test:cookie  → tests 9,  pass 9,  fail 0   (새 파일 test/session-cookie.test.mjs)
+npm run test:notes   → tests 28, pass 28, fail 0
+npm run test:devices → tests 6,  pass 6,  fail 0
+test:r5 3/3 · test:package 3/3 · xdr-run 3/3 · decider:test 통과 · detect:test 통과 · build --local 성공
+뮤테이션 5개 → 전부 잡아냄. 원래 코드로 되돌린 뒤 cmp로 바이트 단위 동일 확인
+  쿠키 요청의 Origin 확인 삭제          → test:cookie 4개, test:auth 1개 실패
+  로그인 응답 본문에 accessToken 다시 넣음 → test:auth 2개 실패
+  쿠키에서 HttpOnly 뺌                   → test:cookie 1개, test:auth 3개 실패
+  로그아웃이 쿠키를 지우지 않음          → test:auth 1개 실패
+  로그인의 출처 확인 삭제                → test:auth 1개 실패
+```
+
+headless Chrome으로 실제 `public/index.html`을 진짜 로그인·메모·기기 승인 처리 코드(Supabase만 가짜)에 붙여 확인했습니다(커밋하지 않은 즉석 점검).
+1. 첫 방문: 로그인 화면, 오류 문구 없음.
+2. 로그인 뒤 쿠키 2개: `__Host-byteback_at`(Path `/`), `__Secure-byteback_rt`(Path `/api/auth`), 둘 다 httpOnly·secure·SameSite Strict·세션 쿠키. `document.cookie`는 빈 문자열, `sessionStorage`·`localStorage` 키 0개.
+3. 승인 요청 → 대기, 서버에서 승인 → 메모 화면, 메모 추가 성공.
+4. 새로고침 뒤에도 메모 화면 유지(이메일 대신 "이 브라우저 세션").
+5. 접근 토큰을 서버에서 만료시킨 뒤 메모 추가: `POST /api/notes`(401) → `POST /api/auth/refresh`(갱신 쿠키 붙음) → `POST /api/notes` 재시도 성공. 자료 경로 요청에는 갱신 쿠키가 붙지 않음.
+6. 다른 사이트(`127.0.0.1`)에서 보낸 POST: 서버에 쿠키 없이 도착(`Sec-Fetch-Site: cross-site`), 메모 늘지 않음.
+7. 로그아웃 → 쿠키 0개, 새로고침해도 로그인 화면.
+8. 모든 요청에서 `Authorization` 헤더 0건, 화면의 모든 POST에 같은 출처 `Origin`.
+
+**확인하지 못한 것:** 실제 Vercel 배포(HTTPS, `Host` 헤더), 실제 Supabase 토큰·갱신 토큰의 문자 범위, Safari·Firefox, 다른 `*.vercel.app` 형제 사이트에서의 실제 공격, 이번 보완에 대한 심판 채점. 위 결과는 모두 로컬 시험입니다.
+
+**다시 실행하는 방법:** `npm run test:auth`, `npm run test:cookie`, `npm run test:notes`, `npm run test:devices`, `npm run test:r5`, `npm run test:package`. 배포 뒤에는 브라우저 개발자 도구 → Application → Cookies에서 두 쿠키의 HttpOnly·Secure·SameSite를, Session Storage가 비어 있는지를 봅니다.

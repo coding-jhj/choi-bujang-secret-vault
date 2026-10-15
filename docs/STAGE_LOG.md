@@ -663,6 +663,12 @@ node --test test/campaign-retest.test.mjs → 2개 모두 통과
    - `mergeCampaign()`의 pass/fail 판정을 `serverRequestId` 기반으로 바꾸고, `kind: 'local'`(decide()/detect() 직접 호출, HTTP 응답 자체가 없음) 케이스는 서버 증거를 요구하지 않도록 kind-aware하게 수정 — 로컬 재현으로 검증 가능한 것까지 억지로 서버 증거를 요구하지 않습니다.
    - `scripts/campaign-retest.mjs`를 전수 점검해, 여러 요청을 한 번에 판정하는 복합 케이스 10건(`S03-08`, `S04-02~04`, `S08-03`, `S11-05`, `S11-07`, `S12-01~03`)이 **애초부터 `vercelId`를 record()에 전혀 넘기지 않던** 별개의 기존 버그도 함께 발견해 고쳤습니다.
    - 실제 재시험 재실행 결과: 58건 중 57건 통과 유지, `attack-check.mjs`의 18개 attackId 전부 진짜 서버 발급 ID(Vercel `x-vercel-id` 또는 Supabase `sb-request-id`)로 연결됨을 확인했습니다. 테스트 90→92개.
+6. **(2026-10-15, 같은 날 4차 재발) `split_votes` 4차 재발 — architect 서브에이전트로 전면 재조사, 추가 결함 3개 + 커밋 순서 문제 발견 및 수정.** 5번 수정 뒤에도 똑같은 점수(53/100)로 재발하자, 더 깊은 모델(architect)에게 증거 파이프라인 전체를 심판 메시지와 한 줄씩 대조시켰습니다. 발견한 것:
+   - `ops/campaign-retest-results.json`에 **`attackId` 필드 자체가 없었습니다** — `S03-01` 같은 카탈로그 id만 있어 `no_login_list`로 직접 찾으면 0건. `src/campaign-cases.mjs`의 카탈로그 18개 항목에 `attackId`를 추가하고 `record()`가 그대로 저장하도록 수정.
+   - `attack-check.mjs`의 관찰 문자열이 심판이 요구한 3요소(HTTP 상태·서버 요청ID·확인 시각) 중 **확인 시각을 아예 안 보여주고** 있었습니다 — 추가.
+   - `S05-04`(공개 키 노출 점검)만 `status`가 `null`로 기록되던 것 — 홈페이지 응답의 실제 상태(200)를 기록하도록 수정.
+   - **구조적 문제도 발견**: 증거 파일을 커밋하는 순간 그 커밋 자체가 새 SHA를 만들기 때문에, `ops/campaign-retest-results.json`의 `deployedCommit`이 그 파일을 담은 커밋과 영원히 한 커밋씩 어긋나 있었습니다(`localDirty: true` 상태에서 재시험을 돌리고 코드와 증거를 같은 커밋에 섞은 것도 원인). 커밋 순서를 "코드만 커밋·push → 배포 확인 → 깨끗한 트리에서 재시험 → 증거만 별도 커밋"으로 바꿔, `deployedCommit === localCommit`(증거 커밋의 부모)·`localDirty: false`가 되도록 고쳤습니다(커밋 `ba65680` 코드 + `0f9ee5c` 증거).
+   - 재시험 결과: 58건 중 57건 통과 유지, 18개 attackId 전부 HTTP 상태·서버 요청ID·확인 시각 완비. 테스트 92→94개.
 
 **지금 상태:** `npm install`은 패키지 10개 추가, 취약점 0건으로 오류 없이 끝납니다(`aleph.config.json`의 `step`도 12로 반영됨). 심판의 "41종"과 이 저장소의 "58건"은 여전히 같은 숫자가 아닙니다 — 위 "57건과 심판의 '41종'은 같은 숫자가 아닙니다" 절 참고(현재는 58건).
 

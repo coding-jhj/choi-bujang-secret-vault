@@ -1,13 +1,13 @@
 {
   "schema": "byteback.campaign-retest.v1",
   "ran": true,
-  "ranAt": "2026-10-15T12:44:54.118Z",
-  "finishedAt": "2026-10-15T12:46:03.984Z",
+  "ranAt": "2026-10-15T13:10:19.108Z",
+  "finishedAt": "2026-10-15T13:11:20.832Z",
   "target": {
     "appOrigin": "https://choi-bujang-secret-vault-omega.vercel.app",
-    "deployedCommit": "508c377f4a3408c9d0ff3e6f684cf6faf0faf3ef",
-    "localCommit": "508c377f4a3408c9d0ff3e6f684cf6faf0faf3ef",
-    "localDirty": true
+    "deployedCommit": "ba65680daee6f02034a35209ed4d5e82eb4902fd",
+    "localCommit": "ba65680daee6f02034a35209ed4d5e82eb4902fd",
+    "localDirty": false
   },
   "cleanupOk": true,
   "cases": [
@@ -16,522 +16,580 @@
       "result": "pass",
       "status": null,
       "observed": "decision=allow reasonCode=device_registered",
-      "checkedAt": "2026-10-15T12:44:54.120Z",
+      "checkedAt": "2026-10-15T13:10:19.111Z",
       "serverRequestId": null,
-      "expected": "allow / device_registered"
+      "expected": "allow / device_registered",
+      "attackId": null
     },
     {
       "id": "S06-02",
       "result": "pass",
       "status": null,
       "observed": "decision=deny reasonCode=device_not_registered",
-      "checkedAt": "2026-10-15T12:44:54.120Z",
+      "checkedAt": "2026-10-15T13:10:19.111Z",
       "serverRequestId": null,
-      "expected": "deny / device_not_registered"
+      "expected": "deny / device_not_registered",
+      "attackId": null
     },
     {
       "id": "S07-01",
       "result": "pass",
       "status": null,
       "observed": "decision=step_up reasonCode=step_up_required",
-      "checkedAt": "2026-10-15T12:44:54.120Z",
+      "checkedAt": "2026-10-15T13:10:19.111Z",
       "serverRequestId": null,
-      "expected": "step_up / step_up_required"
+      "expected": "step_up / step_up_required",
+      "attackId": null
     },
     {
       "id": "S07-02",
       "result": "pass",
       "status": null,
       "observed": "decision=allow reasonCode=step_up_verified",
-      "checkedAt": "2026-10-15T12:44:54.121Z",
+      "checkedAt": "2026-10-15T13:10:19.111Z",
       "serverRequestId": null,
-      "expected": "allow / step_up_verified"
+      "expected": "allow / step_up_verified",
+      "attackId": null
     },
     {
       "id": "S08-06",
       "result": "pass",
       "status": null,
       "observed": "decision=deny reasonCode=announcement_write_denied",
-      "checkedAt": "2026-10-15T12:44:54.121Z",
+      "checkedAt": "2026-10-15T13:10:19.111Z",
       "serverRequestId": null,
-      "expected": "deny / announcement_write_denied"
+      "expected": "deny / announcement_write_denied",
+      "attackId": null
     },
     {
       "id": "S08-07",
       "result": "pass",
       "status": null,
       "observed": "decision=deny reasonCode=notes_list_denied",
-      "checkedAt": "2026-10-15T12:44:54.121Z",
+      "checkedAt": "2026-10-15T13:10:19.111Z",
       "serverRequestId": null,
-      "expected": "deny / notes_list_denied"
+      "expected": "deny / notes_list_denied",
+      "attackId": null
     },
     {
       "id": "S08-08",
       "result": "pass",
       "status": null,
       "observed": "decision=deny reasonCode=zone_mismatch",
-      "checkedAt": "2026-10-15T12:44:54.121Z",
+      "checkedAt": "2026-10-15T13:10:19.111Z",
       "serverRequestId": null,
-      "expected": "deny / zone_mismatch"
+      "expected": "deny / zone_mismatch",
+      "attackId": null
     },
     {
       "id": "S08-09",
       "result": "pass",
       "status": null,
       "observed": "decision=deny reasonCode=unknown_route",
-      "checkedAt": "2026-10-15T12:44:54.121Z",
+      "checkedAt": "2026-10-15T13:10:19.111Z",
       "serverRequestId": null,
-      "expected": "deny / unknown_route"
+      "expected": "deny / unknown_route",
+      "attackId": null
     },
     {
       "id": "S12-04",
       "result": "pass",
       "status": null,
       "observed": "decision=deny reasonCode=device_not_registered",
-      "checkedAt": "2026-10-15T12:44:54.121Z",
+      "checkedAt": "2026-10-15T13:10:19.111Z",
       "serverRequestId": null,
-      "expected": "deny / device_not_registered"
+      "expected": "deny / device_not_registered",
+      "attackId": null
     },
     {
       "id": "S12-05",
       "result": "pass",
       "status": null,
       "observed": "decision=deny reasonCode=announcement_write_denied",
-      "checkedAt": "2026-10-15T12:44:54.121Z",
+      "checkedAt": "2026-10-15T13:10:19.111Z",
       "serverRequestId": null,
-      "expected": "deny / announcement_write_denied"
+      "expected": "deny / announcement_write_denied",
+      "attackId": null
     },
     {
       "id": "S09-01",
       "result": "pass",
       "status": null,
       "observed": "{\"action\":\"observe\"}",
-      "checkedAt": "2026-10-15T12:44:54.121Z",
+      "checkedAt": "2026-10-15T13:10:19.112Z",
       "serverRequestId": null,
-      "expected": "observe"
+      "expected": "observe",
+      "attackId": null
     },
     {
       "id": "S09-02",
       "result": "pass",
       "status": null,
       "observed": "{\"action\":\"observe\"}",
-      "checkedAt": "2026-10-15T12:44:54.121Z",
+      "checkedAt": "2026-10-15T13:10:19.112Z",
       "serverRequestId": null,
-      "expected": "observe"
+      "expected": "observe",
+      "attackId": null
     },
     {
       "id": "S09-03",
       "result": "pass",
       "status": null,
       "observed": "{\"action\":\"propose_revocation\",\"reasonCode\":\"burst_read\",\"subject\":\"learner_fixture\"}",
-      "checkedAt": "2026-10-15T12:44:54.122Z",
+      "checkedAt": "2026-10-15T13:10:19.112Z",
       "serverRequestId": null,
-      "expected": "propose_revocation / burst_read"
+      "expected": "propose_revocation / burst_read",
+      "attackId": null
     },
     {
       "id": "S02-01",
       "result": "pass",
       "status": 404,
       "observed": "HTTP 404",
-      "checkedAt": "2026-10-15T12:44:54.446Z",
-      "serverRequestId": "icn1::mvhn2-1792068294626-f2b1db4d6469",
-      "expected": "404"
+      "checkedAt": "2026-10-15T13:10:19.181Z",
+      "serverRequestId": "icn1::hsk75-1792069819635-7b89c6bf448d",
+      "expected": "404",
+      "attackId": "public_data_json_read"
     },
     {
       "id": "S02-02",
       "result": "pass",
       "status": 200,
       "observed": "HTTP 200",
-      "checkedAt": "2026-10-15T12:44:54.699Z",
-      "serverRequestId": "icn1::7fzk9-1792068294917-8073d0efa5c1",
-      "expected": "200 (정상)"
+      "checkedAt": "2026-10-15T13:10:19.439Z",
+      "serverRequestId": "icn1::bwwvt-1792069819683-844d3deafaae",
+      "expected": "200 (정상)",
+      "attackId": "aleph_json_open"
     },
     {
       "id": "S02-03",
       "result": "pass",
       "status": 200,
       "observed": "x-content-type-options=nosniff",
-      "checkedAt": "2026-10-15T12:44:55.183Z",
-      "serverRequestId": "icn1::lsgrz-1792068295141-aa60761805ca",
-      "expected": "X-Content-Type-Options: nosniff (정상)"
+      "checkedAt": "2026-10-15T13:10:19.671Z",
+      "serverRequestId": "icn1::49gx4-1792069819916-5855ac152de8",
+      "expected": "X-Content-Type-Options: nosniff (정상)",
+      "attackId": "nosniff_header"
     },
     {
       "id": "S03-01",
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "checkedAt": "2026-10-15T12:44:56.292Z",
-      "serverRequestId": "icn1::iad1::285kk-1792068295625-b5cb2789e85c",
-      "expected": "401 LOGIN_REQUIRED"
+      "checkedAt": "2026-10-15T13:10:19.999Z",
+      "serverRequestId": "icn1::iad1::49gx4-1792069820148-247b6ec3328d",
+      "expected": "401 LOGIN_REQUIRED",
+      "attackId": "no_login_list"
     },
     {
       "id": "S03-02",
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "checkedAt": "2026-10-15T12:44:56.745Z",
-      "serverRequestId": "icn1::iad1::vfvjh-1792068296734-fc3c1605b7fa",
-      "expected": "401 LOGIN_REQUIRED"
+      "checkedAt": "2026-10-15T13:10:20.223Z",
+      "serverRequestId": "icn1::iad1::bwwvt-1792069820482-1ba22d99519d",
+      "expected": "401 LOGIN_REQUIRED",
+      "attackId": "no_login_create"
     },
     {
       "id": "S03-03",
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "checkedAt": "2026-10-15T12:44:57.888Z",
-      "serverRequestId": "icn1::iad1::qgv64-1792068297188-2b71f1de7053",
-      "expected": "401 LOGIN_REQUIRED"
+      "checkedAt": "2026-10-15T13:10:20.544Z",
+      "serverRequestId": "icn1::iad1::bwwvt-1792069820701-cf201b4217b9",
+      "expected": "401 LOGIN_REQUIRED",
+      "attackId": "no_login_item_read"
     },
     {
       "id": "S03-04",
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "checkedAt": "2026-10-15T12:44:58.104Z",
-      "serverRequestId": "icn1::iad1::zm8m5-1792068298328-300cf10ab8ff",
-      "expected": "401 LOGIN_REQUIRED"
+      "checkedAt": "2026-10-15T13:10:20.751Z",
+      "serverRequestId": "icn1::iad1::qbzz4-1792069821021-e588cb9177b3",
+      "expected": "401 LOGIN_REQUIRED",
+      "attackId": "forged_token_list"
     },
     {
       "id": "S05-05",
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_FAILED\"}",
-      "checkedAt": "2026-10-15T12:44:59.596Z",
-      "serverRequestId": "icn1::iad1::2rj9m-1792068298547-6a41be4b45a3",
-      "expected": "401 LOGIN_FAILED"
+      "checkedAt": "2026-10-15T13:10:21.601Z",
+      "serverRequestId": "icn1::iad1::l2rvm-1792069821229-9a612ed5bd26",
+      "expected": "401 LOGIN_FAILED",
+      "attackId": "login_bad_credentials"
     },
     {
       "id": "S05-01",
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401",
-      "checkedAt": "2026-10-15T12:44:59.926Z",
-      "serverRequestId": "01a13f98-2d31-79f8-b116-655e5fe6197c",
-      "expected": "401/403"
+      "checkedAt": "2026-10-15T13:10:21.902Z",
+      "serverRequestId": "01a13faf-66a7-7922-9598-54996d740f43",
+      "expected": "401/403",
+      "attackId": "original_api_no_key_read"
     },
     {
       "id": "S05-02",
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401",
-      "checkedAt": "2026-10-15T12:44:59.973Z",
-      "serverRequestId": "01a13f98-2e6f-70d9-8b8c-f6fd74aa76ea",
-      "expected": "401/403"
+      "checkedAt": "2026-10-15T13:10:21.952Z",
+      "serverRequestId": "01a13faf-67ce-7d2a-92d5-eff03f5cbebd",
+      "expected": "401/403",
+      "attackId": "original_api_no_key_write"
     },
     {
       "id": "S05-04",
       "result": "pass",
-      "status": null,
-      "observed": "키 문자열 없음=true, /data.json 404=true",
-      "checkedAt": "2026-10-15T12:45:00.009Z",
-      "serverRequestId": "icn1::9q28m-1792068300415-45cfdcc397c2",
-      "expected": "키 문자열 없음, 옛 파일 404"
+      "status": 200,
+      "observed": "HTTP 200, 키 문자열 없음=true, /data.json 404=true",
+      "checkedAt": "2026-10-15T13:10:21.978Z",
+      "serverRequestId": "icn1::bwwvt-1792069822429-e1763d9b4477",
+      "expected": "키 문자열 없음, 옛 파일 404",
+      "attackId": "public_files_no_key"
     },
     {
       "id": "S11-01",
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "checkedAt": "2026-10-15T12:45:01.179Z",
-      "serverRequestId": "icn1::iad1::6v45h-1792068300450-3f1e90827795",
-      "expected": "401 LOGIN_REQUIRED"
+      "checkedAt": "2026-10-15T13:10:22.306Z",
+      "serverRequestId": "icn1::iad1::bwwvt-1792069822456-998ede8b64c2",
+      "expected": "401 LOGIN_REQUIRED",
+      "attackId": "no_login_device_request"
     },
     {
       "id": "S11-02",
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "checkedAt": "2026-10-15T12:45:01.395Z",
-      "serverRequestId": "icn1::iad1::mvhn2-1792068301622-f72e743d4c7f",
-      "expected": "401 LOGIN_REQUIRED"
+      "checkedAt": "2026-10-15T13:10:22.543Z",
+      "serverRequestId": "icn1::iad1::pwf94-1792069822783-7610d9124a14",
+      "expected": "401 LOGIN_REQUIRED",
+      "attackId": "forged_token_device_request"
     },
     {
       "id": "S11-03",
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "checkedAt": "2026-10-15T12:45:02.481Z",
-      "serverRequestId": "icn1::iad1::42vbh-1792068301835-c66b8f718f4f",
-      "expected": "401 LOGIN_REQUIRED"
+      "checkedAt": "2026-10-15T13:10:22.759Z",
+      "serverRequestId": "icn1::iad1::l2rvm-1792069823020-23cf7fbbb9f2",
+      "expected": "401 LOGIN_REQUIRED",
+      "attackId": "no_login_device_status"
     },
     {
       "id": "S12-06",
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "checkedAt": "2026-10-15T12:45:03.329Z",
-      "serverRequestId": "icn1::iad1::bkgj2-1792068302926-e7af14912637",
-      "expected": "401 LOGIN_REQUIRED"
+      "checkedAt": "2026-10-15T13:10:23.066Z",
+      "serverRequestId": "icn1::iad1::jgq7x-1792069823236-2ef02d7faef0",
+      "expected": "401 LOGIN_REQUIRED",
+      "attackId": null
     },
     {
       "id": "S03-05",
       "result": "pass",
       "status": 201,
-      "observed": "HTTP 201, 응답 {\"id\":\"ef809815-ec16-475b-8bb6-f0573d2aafa5\"}",
-      "checkedAt": "2026-10-15T12:45:06.988Z",
-      "serverRequestId": "icn1::iad1::bkgj2-1792068304770-80f85f12bc7e",
-      "expected": "201 + id (정상)"
+      "observed": "HTTP 201, 응답 {\"id\":\"363d79df-3c69-427c-a90d-f6679c9d284c\"}",
+      "checkedAt": "2026-10-15T13:10:26.736Z",
+      "serverRequestId": "icn1::iad1::jgq7x-1792069824492-1b02e506aa51",
+      "expected": "201 + id (정상)",
+      "attackId": null
     },
     {
       "id": "S03-06",
       "result": "pass",
       "status": 200,
-      "observed": "HTTP 200, 응답 {\"id\":\"ef809815-ec16-475b-8bb6-f0573d2aafa5\",\"title\":\"camp-A-eeb33565\",\"body\":\"재시험용 가상 메모 A (실제 정보 아님)\"}",
-      "checkedAt": "2026-10-15T12:45:08.848Z",
-      "serverRequestId": "icn1::iad1::285kk-1792068307456-ed026aa93584",
-      "expected": "200, 만든 내용 그대로 (정상)"
+      "observed": "HTTP 200, 응답 {\"id\":\"363d79df-3c69-427c-a90d-f6679c9d284c\",\"title\":\"camp-A-23dafd6c\",\"body\":\"재시험용 가상 메모 A (실제 정보 아님)\"}",
+      "checkedAt": "2026-10-15T13:10:28.623Z",
+      "serverRequestId": "icn1::iad1::qbzz4-1792069827216-6c4a3c24701b",
+      "expected": "200, 만든 내용 그대로 (정상)",
+      "attackId": null
     },
     {
       "id": "S03-07",
       "result": "pass",
       "status": 200,
-      "observed": "HTTP 200, 응답 {\"id\":\"ef809815-ec16-475b-8bb6-f0573d2aafa5\",\"title\":\"camp-A-eeb33565\",\"body\":\"고친 내용 (재시험)\"}",
-      "checkedAt": "2026-10-15T12:45:10.007Z",
-      "serverRequestId": "icn1::iad1::lsgrz-1792068309291-995b87cdbee5",
-      "expected": "200, 고친 내용 (정상)"
+      "observed": "HTTP 200, 응답 {\"id\":\"363d79df-3c69-427c-a90d-f6679c9d284c\",\"title\":\"camp-A-23dafd6c\",\"body\":\"고친 내용 (재시험)\"}",
+      "checkedAt": "2026-10-15T13:10:29.817Z",
+      "serverRequestId": "icn1::iad1::hsk75-1792069829101-50e08bb95ddf",
+      "expected": "200, 고친 내용 (정상)",
+      "attackId": null
     },
     {
       "id": "S03-08",
       "result": "pass",
       "status": null,
-      "observed": "삭제 HTTP 200, 응답 {\"id\":\"ef809815-ec16-475b-8bb6-f0573d2aafa5\"} / 재조회 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"}",
-      "checkedAt": "2026-10-15T12:45:13.034Z",
-      "serverRequestId": "icn1::iad1::285kk-1792068310447-4573ff2f0396",
-      "expected": "삭제 200, 재조회 404 (정상)"
+      "observed": "삭제 HTTP 200, 응답 {\"id\":\"363d79df-3c69-427c-a90d-f6679c9d284c\"} / 재조회 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"}",
+      "checkedAt": "2026-10-15T13:10:31.662Z",
+      "serverRequestId": "icn1::iad1::hdjp5-1792069830294-db8d59baca1c",
+      "expected": "삭제 200, 재조회 404 (정상)",
+      "attackId": null
     },
     {
       "id": "S04-01",
       "result": "pass",
       "status": 404,
       "observed": "HTTP 404, 응답 {\"error\":\"NOT_FOUND\"}",
-      "checkedAt": "2026-10-15T12:45:16.437Z",
-      "serverRequestId": "icn1::iad1::2rj9m-1792068315386-e1df6492f383",
-      "expected": "404 NOT_FOUND"
+      "checkedAt": "2026-10-15T13:10:35.067Z",
+      "serverRequestId": "icn1::iad1::7jrww-1792069834386-5324a7503509",
+      "expected": "404 NOT_FOUND",
+      "attackId": null
     },
     {
       "id": "S04-02",
       "result": "pass",
       "status": null,
-      "observed": "B' 수정 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"} / A' 재조회 HTTP 200, 응답 {\"id\":\"bb98b8a4-e195-4a19-83ee-632d2e1d45f3\",\"title\":\"camp-A-eeb33565\",\"body\":\"재시험용 가상 메모 A (실제 정보 아님)\"}",
-      "checkedAt": "2026-10-15T12:45:19.172Z",
-      "serverRequestId": "icn1::iad1::sdt9k-1792068316887-aa97acf3f434",
-      "expected": "404 NOT_FOUND, A' 메모 그대로"
+      "observed": "B' 수정 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"} / A' 재조회 HTTP 200, 응답 {\"id\":\"cbc6507e-79ec-49d7-968d-6893c93cb2c7\",\"title\":\"camp-A-23dafd6c\",\"body\":\"재시험용 가상 메모 A (실제 정보 아님)\"}",
+      "checkedAt": "2026-10-15T13:10:37.326Z",
+      "serverRequestId": "icn1::iad1::zsmxt-1792069835544-5df0e5a03518",
+      "expected": "404 NOT_FOUND, A' 메모 그대로",
+      "attackId": null
     },
     {
       "id": "S04-03",
       "result": "pass",
       "status": null,
-      "observed": "B' 삭제 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"} / A' 재조회 HTTP 200, 응답 {\"id\":\"bb98b8a4-e195-4a19-83ee-632d2e1d45f3\",\"title\":\"camp-A-eeb33565\",\"body\":\"재시험용 가상 메모 A (실제 정보 아님)\"}",
-      "checkedAt": "2026-10-15T12:45:21.415Z",
-      "serverRequestId": "icn1::iad1::bqhhg-1792068319613-c58dd6c1357e",
-      "expected": "404 NOT_FOUND, A' 메모 남아 있음"
+      "observed": "B' 삭제 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"} / A' 재조회 HTTP 200, 응답 {\"id\":\"cbc6507e-79ec-49d7-968d-6893c93cb2c7\",\"title\":\"camp-A-23dafd6c\",\"body\":\"재시험용 가상 메모 A (실제 정보 아님)\"}",
+      "checkedAt": "2026-10-15T13:10:39.562Z",
+      "serverRequestId": "icn1::iad1::nst9k-1792069837804-484b5540d99b",
+      "expected": "404 NOT_FOUND, A' 메모 남아 있음",
+      "attackId": null
     },
     {
       "id": "S04-04",
       "result": "pass",
       "status": 200,
       "observed": "목록 길이=0, A' 포함=false",
-      "checkedAt": "2026-10-15T12:45:22.896Z",
-      "serverRequestId": "icn1::iad1::9q28m-1792068321855-907c5d97849d",
-      "expected": "200, A' 메모 id 없음"
+      "checkedAt": "2026-10-15T13:10:41.247Z",
+      "serverRequestId": "icn1::iad1::nst9k-1792069840040-3f1a358951e8",
+      "expected": "200, A' 메모 id 없음",
+      "attackId": null
     },
     {
       "id": "S05-06",
       "result": "pass",
       "status": 200,
       "observed": "본문 키=email,expiresAt, Set-Cookie 개수=2",
-      "checkedAt": "2026-10-15T12:45:23.613Z",
-      "serverRequestId": "icn1::iad1::fsrkx-1792068323480-16ee474b4d3e",
-      "expected": "200, 본문은 email·expiresAt뿐, httpOnly 쿠키 2개 (정상)"
+      "checkedAt": "2026-10-15T13:10:41.958Z",
+      "serverRequestId": "icn1::iad1::wvmlg-1792069841871-51f4d013ab37",
+      "expected": "200, 본문은 email·expiresAt뿐, httpOnly 쿠키 2개 (정상)",
+      "attackId": null
     },
     {
       "id": "S08-01",
       "result": "pass",
       "status": 201,
-      "observed": "HTTP 201, 응답 {\"id\":\"8eedf29d-e648-45df-8010-3ea015dd6295\"}",
-      "checkedAt": "2026-10-15T12:45:26.191Z",
-      "serverRequestId": "icn1::iad1::285kk-1792068324121-1dffd9e45414",
-      "expected": "201 + id (정상)"
+      "observed": "HTTP 201, 응답 {\"id\":\"8e9bd9f7-d88d-42a8-b284-45fab9b7abf5\"}",
+      "checkedAt": "2026-10-15T13:10:43.857Z",
+      "serverRequestId": "icn1::iad1::nst9k-1792069842478-82aeb519fec9",
+      "expected": "201 + id (정상)",
+      "attackId": null
     },
     {
       "id": "S08-02",
       "result": "pass",
       "status": 404,
       "observed": "HTTP 404, 응답 {\"error\":\"NOT_FOUND\"}",
-      "checkedAt": "2026-10-15T12:45:28.294Z",
-      "serverRequestId": "icn1::iad1::2rj9m-1792068326632-5f8b1452c763",
-      "expected": "404 NOT_FOUND"
+      "checkedAt": "2026-10-15T13:10:45.305Z",
+      "serverRequestId": "icn1::iad1::bwwvt-1792069844335-7d7a6b93f036",
+      "expected": "404 NOT_FOUND",
+      "attackId": null
     },
     {
       "id": "S08-03",
       "result": "pass",
       "status": null,
-      "observed": "B' 수정 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"} / A' 재조회 HTTP 200, 응답 {\"id\":\"8eedf29d-e648-45df-8010-3ea015dd6295\",\"title\":\"camp-ann-A-eeb33565\",\"body\":\"재시험용 가상 공지 A (실제 정보 아님)\"}",
-      "checkedAt": "2026-10-15T12:45:31.014Z",
-      "serverRequestId": "icn1::iad1::2rj9m-1792068328737-c143bc955da1",
-      "expected": "404 NOT_FOUND, A' 공지 그대로"
+      "observed": "B' 수정 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"} / A' 재조회 HTTP 200, 응답 {\"id\":\"8e9bd9f7-d88d-42a8-b284-45fab9b7abf5\",\"title\":\"camp-ann-A-23dafd6c\",\"body\":\"재시험용 가상 공지 A (실제 정보 아님)\"}",
+      "checkedAt": "2026-10-15T13:10:47.886Z",
+      "serverRequestId": "icn1::iad1::nst9k-1792069845783-3ec65460fed4",
+      "expected": "404 NOT_FOUND, A' 공지 그대로",
+      "attackId": null
     },
     {
       "id": "S08-04",
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "checkedAt": "2026-10-15T12:45:31.234Z",
-      "serverRequestId": "icn1::iad1::lsgrz-1792068331457-8b932c2d6d2a",
-      "expected": "401 LOGIN_REQUIRED"
+      "checkedAt": "2026-10-15T13:10:48.114Z",
+      "serverRequestId": "icn1::iad1::r454w-1792069848363-1d89a567d91a",
+      "expected": "401 LOGIN_REQUIRED",
+      "attackId": "no_login_announcements_list"
     },
     {
       "id": "S08-05",
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "checkedAt": "2026-10-15T12:45:31.475Z",
-      "serverRequestId": "icn1::iad1::285kk-1792068331676-854dbc588eab",
-      "expected": "401 LOGIN_REQUIRED"
+      "checkedAt": "2026-10-15T13:10:48.323Z",
+      "serverRequestId": "icn1::iad1::bwwvt-1792069848593-64e6de8dbd5f",
+      "expected": "401 LOGIN_REQUIRED",
+      "attackId": "no_login_announcements_create"
     },
     {
       "id": "S08-10",
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "checkedAt": "2026-10-15T12:45:31.694Z",
-      "serverRequestId": "icn1::iad1::lsgrz-1792068331919-0c5482f43d55",
-      "expected": "401 LOGIN_REQUIRED"
+      "checkedAt": "2026-10-15T13:10:48.538Z",
+      "serverRequestId": "icn1::iad1::r454w-1792069848800-c366caf478f7",
+      "expected": "401 LOGIN_REQUIRED",
+      "attackId": "no_login_announcement_write"
     },
     {
       "id": "S10-01",
       "result": "pass",
       "status": 401,
       "observed": "HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"}",
-      "checkedAt": "2026-10-15T12:45:32.798Z",
-      "serverRequestId": "icn1::iad1::285kk-1792068332358-972b6e789c03",
-      "expected": "401 LOGIN_REQUIRED"
+      "checkedAt": "2026-10-15T13:10:49.130Z",
+      "serverRequestId": "icn1::iad1::r454w-1792069849229-dd21e6c92b96",
+      "expected": "401 LOGIN_REQUIRED",
+      "attackId": "no_login_restore"
     },
     {
       "id": "S10-02",
       "result": "pass",
       "status": 200,
-      "observed": "복구 HTTP 200, 응답 {\"id\":\"37f7bc28-fc10-418b-ab3f-2568bd6982c3\",\"title\":\"camp-B-eeb33565\",\"body\":\"재시험용 가상 메모 B 원본 (실제 정보 아님)\",\"ownerId\":\"a80ed954-51fd-42b3-85e3-ba099092a81a\",\"contentSha256\":\"01adc603a57d000b06190f91f1ec49e25c3576cb40efc112c6527de732fe4270\",\"restoredFrom\":\"2026-10-15T12:45:35.584Z\",\"au…",
-      "checkedAt": "2026-10-15T12:45:40.724Z",
-      "serverRequestId": "icn1::iad1::jw66r-1792068336954-e6995e2fcad5",
-      "expected": "200, 원본으로 돌아옴, 3값 대조 true, audit recorded (정상)"
+      "observed": "복구 HTTP 200, 응답 {\"id\":\"406ee37d-75f0-4a07-8a14-726749da6212\",\"title\":\"camp-B-23dafd6c\",\"body\":\"재시험용 가상 메모 B 원본 (실제 정보 아님)\",\"ownerId\":\"4343135b-df32-4e2b-84e9-8796a97ccd6e\",\"contentSha256\":\"01adc603a57d000b06190f91f1ec49e25c3576cb40efc112c6527de732fe4270\",\"restoredFrom\":\"2026-10-15T13:10:51.624Z\",\"au…",
+      "checkedAt": "2026-10-15T13:10:57.014Z",
+      "serverRequestId": "icn1::iad1::zsmxt-1792069853501-5a94828f7ce3",
+      "expected": "200, 원본으로 돌아옴, 3값 대조 true, audit recorded (정상)",
+      "attackId": null
     },
     {
       "id": "S10-03",
       "result": "pass",
       "status": 404,
       "observed": "HTTP 404, 응답 {\"error\":\"NOT_FOUND\",\"verification\":{\"backupId\":null,\"backupSha256\":null,\"idMatch\":null,\"ownerMatch\":null,\"hashMatch\":null,\"persistedSha256\":null,\"rolledBack\":false,\"audit\":\"not_written\"}}",
-      "checkedAt": "2026-10-15T12:45:41.764Z",
-      "serverRequestId": "icn1::iad1::9q28m-1792068341165-544d14f112f4",
-      "expected": "404 NOT_FOUND, 대조값(backupId·backupSha256·idMatch·ownerMatch·hashMatch·persistedSha256)은 전부 null, rolledBack=false, audit=not_written"
+      "checkedAt": "2026-10-15T13:10:58.558Z",
+      "serverRequestId": "icn1::iad1::49gx4-1792069857500-fbd52c6e1873",
+      "expected": "404 NOT_FOUND, 대조값(backupId·backupSha256·idMatch·ownerMatch·hashMatch·persistedSha256)은 전부 null, rolledBack=false, audit=not_written",
+      "attackId": null
     },
     {
       "id": "S10-04",
       "result": "pass",
       "status": 200,
-      "observed": "HTTP 200, 응답 {\"id\":\"bb98b8a4-e195-4a19-83ee-632d2e1d45f3\",\"title\":\"camp-A-eeb33565\",\"body\":\"재시험용 가상 메모 A (실제 정보 아님)\"}",
-      "checkedAt": "2026-10-15T12:45:42.882Z",
-      "serverRequestId": "icn1::iad1::fsshf-1792068342208-fd12927ca3d9",
-      "expected": "200, 원래 내용 그대로 (정상)"
+      "observed": "HTTP 200, 응답 {\"id\":\"cbc6507e-79ec-49d7-968d-6893c93cb2c7\",\"title\":\"camp-A-23dafd6c\",\"body\":\"재시험용 가상 메모 A (실제 정보 아님)\"}",
+      "checkedAt": "2026-10-15T13:10:59.229Z",
+      "serverRequestId": "icn1::iad1::r454w-1792069859037-8033ff018d53",
+      "expected": "200, 원래 내용 그대로 (정상)",
+      "attackId": null
     },
     {
       "id": "S11-04",
       "result": "pass",
       "status": 403,
       "observed": "HTTP 403, 응답 {\"error\":\"DEVICE_NOT_APPROVED\"}",
-      "checkedAt": "2026-10-15T12:45:44.057Z",
-      "serverRequestId": "icn1::iad1::fsshf-1792068343628-7b92cf4fb7b4",
-      "expected": "403 DEVICE_NOT_APPROVED"
+      "checkedAt": "2026-10-15T13:11:00.401Z",
+      "serverRequestId": "icn1::iad1::r454w-1792069859986-c449b09d40a8",
+      "expected": "403 DEVICE_NOT_APPROVED",
+      "attackId": null
     },
     {
       "id": "S11-05",
       "result": "pass",
       "status": null,
       "observed": "요청 HTTP 200, 응답 {\"status\":\"pending\"} / 메모 HTTP 403, 응답 {\"error\":\"DEVICE_NOT_APPROVED\"}",
-      "checkedAt": "2026-10-15T12:45:46.706Z",
-      "serverRequestId": "icn1::iad1::285kk-1792068344499-80261f5e7297",
-      "expected": "승인 요청 200 pending, 메모 403"
+      "checkedAt": "2026-10-15T13:11:02.320Z",
+      "serverRequestId": "icn1::iad1::49gx4-1792069860879-fb8326a382b2",
+      "expected": "승인 요청 200 pending, 메모 403",
+      "attackId": null
     },
     {
       "id": "S11-06",
       "result": "pass",
       "status": 200,
       "observed": "HTTP 200, 응답 []",
-      "checkedAt": "2026-10-15T12:45:48.226Z",
-      "serverRequestId": "icn1::iad1::bqhhg-1792068347194-d332a524caf0",
-      "expected": "200 (정상)"
+      "checkedAt": "2026-10-15T13:11:03.916Z",
+      "serverRequestId": "icn1::iad1::nst9k-1792069862851-3562059fc8ac",
+      "expected": "200 (정상)",
+      "attackId": null
     },
     {
       "id": "S11-07",
       "result": "pass",
       "status": null,
       "observed": "메모 HTTP 403, 응답 {\"error\":\"DEVICE_NOT_APPROVED\"} / 재요청 HTTP 200, 응답 {\"status\":\"revoked\"}",
-      "checkedAt": "2026-10-15T12:45:50.636Z",
-      "serverRequestId": "icn1::iad1::bkgj2-1792068348713-6a7ded801d4b",
-      "expected": "메모 403, 재요청해도 revoked"
+      "checkedAt": "2026-10-15T13:11:06.101Z",
+      "serverRequestId": "icn1::iad1::r454w-1792069864468-25582eedbe95",
+      "expected": "메모 403, 재요청해도 revoked",
+      "attackId": null
     },
     {
       "id": "S11-08",
       "result": "pass",
       "status": 403,
       "observed": "거부 HTTP 403, 응답 {\"error\":\"CSRF_REJECTED\"}, 메모 수 0->0",
-      "checkedAt": "2026-10-15T12:45:53.517Z",
-      "serverRequestId": "icn1::iad1::6v45h-1792068352271-07f7ad71db8c",
-      "expected": "403 CSRF_REJECTED, 메모 수 그대로"
+      "checkedAt": "2026-10-15T13:11:09.119Z",
+      "serverRequestId": "icn1::iad1::hsk75-1792069868151-c7942317a767",
+      "expected": "403 CSRF_REJECTED, 메모 수 그대로",
+      "attackId": null
     },
     {
       "id": "S11-09",
       "result": "pass",
       "status": 200,
       "observed": "HTTP 200, 응답 []",
-      "checkedAt": "2026-10-15T12:45:55.062Z",
-      "serverRequestId": "icn1::iad1::285kk-1792068353959-4b3035338013",
-      "expected": "200 (정상)"
+      "checkedAt": "2026-10-15T13:11:10.611Z",
+      "serverRequestId": "icn1::iad1::hsk75-1792069869598-c432e8f92866",
+      "expected": "200 (정상)",
+      "attackId": null
     },
     {
       "id": "S11-10",
       "result": "pass",
       "status": 200,
       "observed": "HTTP 200, 응답 {\"status\":\"approved\"}",
-      "checkedAt": "2026-10-15T12:45:56.242Z",
-      "serverRequestId": "icn1::iad1::bkgj2-1792068355505-5681ff26ad87",
-      "expected": "200 approved (정상)"
+      "checkedAt": "2026-10-15T13:11:12.030Z",
+      "serverRequestId": "icn1::iad1::nst9k-1792069871090-10d9b505f9b5",
+      "expected": "200 approved (정상)",
+      "attackId": null
     },
     {
       "id": "S12-01",
       "result": "pass",
       "status": null,
       "observed": "무인증 HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"} / 타인조회 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"}",
-      "checkedAt": "2026-10-15T12:45:57.451Z",
-      "serverRequestId": "icn1::iad1::pkrkc-1792068356683-ff28c3b0d205",
-      "expected": "401 + 404, 어느 응답에도 메모 내용 없음"
+      "checkedAt": "2026-10-15T13:11:13.651Z",
+      "serverRequestId": "icn1::iad1::qbzz4-1792069872513-cc89e0c4e613",
+      "expected": "401 + 404, 어느 응답에도 메모 내용 없음",
+      "attackId": null
     },
     {
       "id": "S12-02",
       "result": "pass",
       "status": null,
       "observed": "승인 전 HTTP 403, 응답 {\"error\":\"DEVICE_NOT_APPROVED\"} / 로그아웃 HTTP 200, 응답 {\"ok\":true} / 재시도 HTTP 403, 응답 {\"error\":\"DEVICE_NOT_APPROVED\"}",
-      "checkedAt": "2026-10-15T12:46:00.469Z",
-      "serverRequestId": "icn1::iad1::pkrkc-1792068360006-a4184acbf905",
-      "expected": "승인 전 403, 로그아웃 뒤 재시도 401/403"
+      "checkedAt": "2026-10-15T13:11:17.093Z",
+      "serverRequestId": "icn1::iad1::pwf94-1792069877054-418e1e0c2244",
+      "expected": "승인 전 403, 로그아웃 뒤 재시도 401/403",
+      "attackId": null
     },
     {
       "id": "S12-03",
       "result": "pass",
       "status": null,
-      "observed": "무서명 수정(메모) HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"} / 무서명 수정(공지) HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"} / 타인 조회 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"} / 구역 밖 조회 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"} / 재확인 HTTP 200, 응답 {\"id\":\"37f7bc28-fc10-418b-ab3f-2568bd6982c3\",\"title\":\"camp-B-eeb33565\",\"body\":\"재시험용 가상 메모…",
-      "checkedAt": "2026-10-15T12:46:03.127Z",
-      "serverRequestId": "icn1::iad1::84cl4-1792068360914-ee8293b95d91",
-      "expected": "401·401·404·404, 복구된 내용 그대로"
+      "observed": "무서명 수정(메모) HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"} / 무서명 수정(공지) HTTP 401, 응답 {\"error\":\"LOGIN_REQUIRED\"} / 타인 조회 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"} / 구역 밖 조회 HTTP 404, 응답 {\"error\":\"NOT_FOUND\"} / 재확인 HTTP 200, 응답 {\"id\":\"406ee37d-75f0-4a07-8a14-726749da6212\",\"title\":\"camp-B-23dafd6c\",\"body\":\"재시험용 가상 메모…",
+      "checkedAt": "2026-10-15T13:11:19.892Z",
+      "serverRequestId": "icn1::iad1::hzqkz-1792069877587-43a714139158",
+      "expected": "401·401·404·404, 복구된 내용 그대로",
+      "attackId": null
     },
     {
       "id": "S05-03",
       "result": "not_run",
       "status": null,
       "observed": "이번 실행에서 다루지 않음",
-      "checkedAt": "2026-10-15T12:46:03.884Z",
+      "checkedAt": "2026-10-15T13:11:20.719Z",
       "serverRequestId": null,
-      "expected": "401/403"
+      "expected": "401/403",
+      "attackId": null
     }
   ]
 }

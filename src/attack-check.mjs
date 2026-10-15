@@ -90,8 +90,17 @@ function describeCase(merged) {
   // time) - a second judge memo pointed out this file used to omit it entirely.
   const idBit = serverRequestId ? `, 서버 요청ID ${serverRequestId}` : '';
   const atBit = checkedAt ? `, 확인 시각 ${checkedAt}` : '';
-  if (state === 'pass') return `증거 확인됨 (${detail}${idBit}${atBit})`;
-  if (state === 'fail') return `증거 확인됨, 그러나 기대와 다름 (${detail}${idBit}${atBit})`;
+  // The judge's own submission validator caps this string at 300 chars; serverRequestId and
+  // checkedAt are the actual evidence, so when a composite case's detail text is long, clip only
+  // the detail (never the id/time) so the real evidence always survives intact.
+  const budget = (label) => 300 - label.length - 2 /* '(' ')' */ - idBit.length - atBit.length;
+  const clip = (label, text) => {
+    const max = budget(label);
+    const body = text.length > max ? `${text.slice(0, Math.max(0, max - 1))}…` : text;
+    return `${label}(${body}${idBit}${atBit})`;
+  };
+  if (state === 'pass') return clip('증거 확인됨 ', detail);
+  if (state === 'fail') return clip('증거 확인됨, 그러나 기대와 다름 ', detail);
   if (state === 'stale') return 'stale (campaign-retest 결과가 현재 기대값과 다름, 재실행 필요)';
   if (state === 'invalid') return 'invalid (campaign-retest 저장 결과 형식 오류)';
   return '미실행 (campaign-retest가 이 점검을 아직 실행하지 않음)';

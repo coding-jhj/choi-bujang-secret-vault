@@ -571,7 +571,7 @@ headless Chrome으로 실제 `public/index.html`을 진짜 로그인·메모·�
   - `stored`: 커밋된 `ops/campaign-retest-results.json`입니다. 실행 시각, 대상, 배포 커밋을 함께 보여 주고, 지금 배포와 같은 커밋인지 표시합니다.
   - 어느 칸도 고정 문구 "정상"으로 대신하지 않습니다. 호출이 실패하면 `error`, 기대와 다르면 `mismatch`입니다. 숫자는 **검증된 본인(owner_id) 것만** 셉니다. 이 저장소와 판정 계약에는 역할(role)이 없으므로, 다른 사람의 자료는 개수조차 보여 주지 않습니다. 상태·시각 칸만 고르고, 메모 제목·내용·기기 번호·백업 id·owner id는 읽지도 보내지도 않습니다.
 - **`public/ops.html` — 탈환 작전실 화면.** `index.html`과 같은 모양이고, 쿠키 인증을 쓰며 토큰을 보관하지 않습니다. 401이면 갱신을 한 번 시도한 뒤 로그인 안내를, 403이면 승인 안내를 보여 줍니다. 판정기·탐지기 대조표, 승인 현황 수, 백업·복구 수, 재시험 57건 표(번호·종류·내용·기대·실제·확인 시각·상태)를 그립니다. 모든 값은 `textContent`로만 넣고, `innerHTML`·브라우저 저장소·`Authorization` 헤더는 쓰지 않습니다.
-- `aleph.config.json`: `allowedRoutes`에 `GET /api/ops/summary`를 넣었습니다. **`step`은 11 그대로입니다**(최종 검토 때 올림).
+- `aleph.config.json`: `allowedRoutes`에 `GET /api/ops/summary`를 넣었습니다. **`step`은 12로 올렸습니다**(아래 12단계 보완에서 실배포 재시험까지 끝낸 뒤 반영).
 
 ### 학생이 만든 부분과 ALEPH SDP 엔진이 제공한 부분
 
@@ -640,8 +640,15 @@ node --test test/campaign-retest.test.mjs → 2개 모두 통과
 
 ### 확인하지 못한 것
 
-- `public/ops.html`을 실제 브라우저로 열어 보지 않았습니다(문법 검사만 함). 실제 배포·실제 Supabase에서 `/api/ops/summary`를 부른 적도 없습니다.
-- `scripts/campaign-retest.mjs`를 실제 배포·실제 Supabase에 대고 돌려 보지 않았습니다. 가짜 서버로만 검증했습니다.
+- `public/ops.html`을 실제 브라우저로 열어 보지 않았습니다(문법 검사만 함).
 - 로그아웃 회수는 로컬 가짜 저장소로만 시험했습니다. 실제 Supabase에서 회수 뒤 403이 되는지는 배포 뒤 직접 확인해야 합니다. 이번 단계에 대한 심판 채점도 없습니다.
 
 **다시 실행하는 방법:** `node --test "test/*.test.mjs"`, `npm run build -- --local`.
+
+### 12단계 보완 — 실배포 재시험과 심판 `evidence_rejected` 대응
+
+1. **(538cba5) 재시험 도구 자체의 버그 수정.** 실배포에 대해 처음 돌렸을 때 `S10-03`(기대값 설명이 "검증 값 전부 null"로 틀려 있었음 — 실제로는 대조용 6개 필드만 null이고 `rolledBack`·`audit`은 항상 값이 있음)과 `S12-03`(구역 밖 조회를 로그인 없이 보내 401만 봤는데, 실제로는 로그인한 상태에서 소유자·구역이 다른 404를 봐야 함) 두 건이 배포 사이트 문제가 아니라 `scripts/campaign-retest.mjs`·`src/campaign-cases.mjs` 자신의 버그로 밝혀져 고쳤습니다.
+2. **(ced9eef) 심판의 격리 환경 대응 — `S12_BUNDLE_UNSUPPORTED`.** 심판 채점 환경은 GET·HEAD만 보낼 수 있어서, `src/attack-check.mjs`의 쓰기 점검 8건(메모·공지 추가/수정, 복구, 기기 승인 요청 2건, 원본 DB 쓰기, 틀린 로그인)이 끝까지 실행되지 못해 `npm run bundle`이 멈췄습니다. 이 8건은 이제 실제 요청을 보내지 않고 `observed`에 고정된 미실행 문구만 기록합니다(GET 점검 10건은 그대로 실행). `test/r5.test.mjs`에 뮤테이션 검증 회귀 테스트를 추가했습니다.
+3. **(81be7be) 실배포·실제 Supabase에 대고 재시험 실행 — `S12_SCREEN_MISMATCH` 대응.** 심판이 `reasonCode S12_SCREEN_MISMATCH`로 지적한 지점은 "`ops/campaign-retest-results.json`이 자리표시자(`{"ran": false, "cases": []}`) 그대로인데 작전실 화면은 수치를 보여준다"는 점이었습니다. `scripts/campaign-retest.mjs`를 실제 배포(`https://choi-bujang-secret-vault-omega.vercel.app`, 배포 커밋 `ced9eef`)에 대해 직접 실행해 **57건 중 56건 통과·1건 미실행(`S05-03`)·0건 실패**를 얻었고, 그 결과를 `ops/campaign-retest-results.json`에 그대로 커밋했습니다.
+
+**지금 상태:** `npm install`은 패키지 10개 추가, 취약점 0건으로 오류 없이 끝납니다(`aleph.config.json`의 `step`도 12로 반영됨). 심판의 "41종"과 이 저장소의 "57건"은 여전히 같은 숫자가 아닙니다 — 위 "57건과 심판의 '41종'은 같은 숫자가 아닙니다" 절 참고.

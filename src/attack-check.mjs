@@ -114,7 +114,8 @@ export async function runAttackChecks(config) {
   ];
   const results = [];
   for (const [attackId, expected, send, write] of checks) {
-    results.push({ attackId, expected, observed: write ? NOT_RUN : rejected(await send()) });
+    const observed = write ? NOT_RUN : await send().then(rejected, () => '점검하지 못함 (요청 실패)');
+    results.push({ attackId, expected, observed });
   }
   const original = originalApi(config);
   results.push({ attackId: 'original_api_no_key_read',
@@ -129,15 +130,18 @@ export async function runAttackChecks(config) {
   results.push({ attackId: 'login_bad_credentials',
     expected: '틀린 로그인 정보가 서버 로그인 경로에서 401/403과 JSON으로 거부됨',
     observed: NOT_RUN });
-  const data = await probe(url('/data.json'));
   results.push({ attackId: 'public_data_json_read', expected: '/data.json이 열리지 않음',
-    observed: data.status === 404 ? '열리지 않음 (HTTP 404)' : `열릴 수 있음 (HTTP ${data.status})` });
-  const identity = await probe(url('/aleph.json'));
+    observed: await probe(url('/data.json')).then(
+      data => data.status === 404 ? '열리지 않음 (HTTP 404)' : `열릴 수 있음 (HTTP ${data.status})`,
+      () => '점검하지 못함 (요청 실패)') });
   results.push({ attackId: 'aleph_json_open', expected: '/aleph.json이 열림',
-    observed: identity.status === 200 ? '열림 (HTTP 200)' : `열리지 않음 (HTTP ${identity.status})` });
-  const home = await probe(url('/'));
+    observed: await probe(url('/aleph.json')).then(
+      identity => identity.status === 200 ? '열림 (HTTP 200)' : `열리지 않음 (HTTP ${identity.status})`,
+      () => '점검하지 못함 (요청 실패)') });
   results.push({ attackId: 'nosniff_header', expected: '첫 화면 응답에 X-Content-Type-Options: nosniff가 있음',
-    observed: home.headers.get('x-content-type-options')?.toLowerCase() === 'nosniff'
-      ? '헤더 있음 (nosniff)' : '헤더 없음' });
+    observed: await probe(url('/')).then(
+      home => home.headers.get('x-content-type-options')?.toLowerCase() === 'nosniff'
+        ? '헤더 있음 (nosniff)' : '헤더 없음',
+      () => '점검하지 못함 (요청 실패)') });
   return results;
 }

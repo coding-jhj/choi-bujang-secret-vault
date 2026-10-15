@@ -7,6 +7,7 @@ import { createLoginVerifier } from '../src/verify-login.mjs';
 import { CLEANUP_TABLES, runRetest } from '../scripts/post-restore-retest.mjs';
 import { createDeviceApprovalStore } from '../src/device-approval.mjs';
 import { fakeDeviceDb } from './fake-device-db.mjs';
+import { SignJWT, createLocalJWKSet, exportJWK, generateKeyPair } from 'jose';
 
 const A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -24,25 +25,29 @@ function memoryStore() {
   };
 }
 
+// Step 11: the verifier also returns sessionId, derived from the verified token's own claims
+// (src/verify-login.mjs). The gate keys approval on (userId, sessionId); no client value is read.
+const SA = '5a5a5a5a-0000-4000-8000-00000000000a';
+const SB = '5b5b5b5b-0000-4000-8000-00000000000b';
+const SJ = '5c5c5c5c-0000-4000-8000-00000000000c';
+const S_NEW = '5d5d5d5d-0000-4000-8000-00000000000d';
 const verify = async authorization => {
-  if (authorization === 'Bearer user-a') return { userId: A };
-  if (authorization === 'Bearer user-b') return { userId: B };
+  if (authorization === 'Bearer user-a') return { userId: A, sessionId: SA };
+  if (authorization === 'Bearer user-b') return { userId: B, sessionId: SB };
+  if (authorization === 'Bearer user-a-new-login') return { userId: A, sessionId: S_NEW };
+  if (authorization === 'Bearer user-a-no-session') return { userId: A, sessionId: null };
   return null;
 };
 
-// Step 11: every data API needs a device store. Tests written before step 11 run as an approved
-// device: `call` sends APPROVED_DEVICE whenever a token is given, unless `device` overrides it
-// (`device: null` = send no X-Device-Id header at all).
-const APPROVED_DEVICE = 'approved-device-0000000000000001';
-const devices = { status: async (_owner, deviceId) => (deviceId === APPROVED_DEVICE ? 'approved' : 'unknown') };
+// Tests written before step 11 run on approved sessions (SA, SB, and the judge's SJ below).
+const APPROVED_SESSIONS = new Set([SA, SB, SJ]);
+const devices = { status: async (_owner, session) => (APPROVED_SESSIONS.has(session) ? 'approved' : 'unknown') };
 
-function call(handler, { method = 'GET', token, body, query, device } = {}) {
+function call(handler, { method = 'GET', token, body, query, headers: extra } = {}) {
   return new Promise(resolve => {
     const headers = new Map();
-    const requestHeaders = {};
+    const requestHeaders = { ...extra };
     if (token) requestHeaders.authorization = `Bearer ${token}`;
-    const deviceId = device === undefined ? (token ? APPROVED_DEVICE : undefined) : device;
-    if (deviceId !== undefined && deviceId !== null) requestHeaders['x-device-id'] = deviceId;
     const request = { method, query, body, headers: requestHeaders };
     const response = {
       setHeader: (k, v) => headers.set(k.toLowerCase(), v),
@@ -118,10 +123,9 @@ test('저장소 오류는 내부 내용 없이 502로만 알린다', async () =>
   assert.deepEqual(result.body, { error: 'NOTES_UNAVAILABLE' });
 });
 
-// ---- Step 11: device approval gate on the real data routes ----
+// ---- Step 11: device (login session) approval gate on the real data routes ----
 // The real createDeviceApprovalStore over a fake device_approvals table, and a notes store that
 // counts every call, so "no data" means the store was never even asked.
-const NEW_DEVICE = '0f0f0f0f-1e1e-4d2d-8c3c-4b4b4b4b4b4b';
 function countingStore() {
   const store = memoryStore();
   let calls = 0;
@@ -129,27 +133,31 @@ function countingStore() {
   return { store, counted, calls: () => calls };
 }
 
-test('11단계: X-Device-Id가 없으면 로그인해도 모든 메모 경로가 403이고 저장소를 읽지 않는다', async () => {
+test('11단계: 세션 정보가 없는 토큰은 어떤 헤더를 붙여도 모든 메모 경로가 403이고 저장소를 읽지 않는다', async () => {
   const { store, counted, calls } = countingStore();
   const id = await store.create(A, { title: 'A 메모', body: 'A 내용' });
-  const api = createNotesApi({ verify, store: counted, devices: createDeviceApprovalStore(fakeDeviceDb()) });
+  const db = fakeDeviceDb();
+  const deviceStore = createDeviceApprovalStore(db);
+  const api = createNotesApi({ verify, store: counted, devices: deviceStore });
+  // Even an approved row for a session the client "names" in a header does not help.
+  await deviceStore.request(A, S_NEW);
+  db.setStatus(A, S_NEW, 'approved');
   const tries = [
     [api.collection, 'GET', undefined], [api.collection, 'POST', undefined],
     [api.item, 'GET', { id }], [api.item, 'PUT', { id }], [api.item, 'DELETE', { id }],
   ];
   for (const [handler, method, query] of tries) {
-    for (const device of [null, '', 'short', `${NEW_DEVICE}, ${NEW_DEVICE}`]) {
-      const result = await call(handler, { method, token: 'user-a', query, device, body: { title: 't', body: 'b' } });
-      assert.deepEqual([result.status, result.body], [403, { error: 'DEVICE_ID_REQUIRED' }], `${method} ${device}`);
-      assert.equal(result.headers.get('cache-control'), 'no-store');
-    }
+    const result = await call(handler, { method, token: 'user-a-no-session', query, body: { title: 't', body: 'b' },
+      headers: { 'x-device-id': S_NEW, 'x-session-id': S_NEW } });
+    assert.deepEqual([result.status, result.body], [403, { error: 'DEVICE_NOT_APPROVED' }], method);
+    assert.equal(result.headers.get('cache-control'), 'no-store');
   }
   assert.equal(calls(), 0);
-  // Login is still checked first: no token -> 401, even with a device header.
-  assert.equal((await call(api.collection, { device: NEW_DEVICE })).status, 401);
+  // Login is still checked first: no token -> 401.
+  assert.equal((await call(api.collection, { headers: { 'x-device-id': S_NEW } })).status, 401);
 });
 
-test('11단계: 승인되지 않은 기기(처음 보는·대기·회수)는 403이고 메모 내용이 응답에 없다 (경로 우회)', async () => {
+test('11단계: 승인되지 않은 로그인 세션(처음·대기·회수)은 403이고 메모 내용이 응답에 없다 (경로 우회)', async () => {
   const { store, counted, calls } = countingStore();
   const id = await store.create(A, { title: 'A 비밀 제목', body: 'A 비밀 내용' });
   const db = fakeDeviceDb();
@@ -158,10 +166,10 @@ test('11단계: 승인되지 않은 기기(처음 보는·대기·회수)는 403
   const restore = createNotesRestoreApi({ verify, store: createRestoreStore(fakeSupabase()), devices: deviceStore });
   const probe = async () => {
     const results = [
-      await call(api.collection, { token: 'user-a', device: NEW_DEVICE }),
-      await call(api.item, { token: 'user-a', device: NEW_DEVICE, query: { id } }),
-      await call(api.item, { method: 'PUT', token: 'user-a', device: NEW_DEVICE, query: { id }, body: { title: 'x', body: 'x' } }),
-      await call(restore.item, { method: 'POST', token: 'user-a', device: NEW_DEVICE, query: { id } }),
+      await call(api.collection, { token: 'user-a' }),
+      await call(api.item, { token: 'user-a', query: { id } }),
+      await call(api.item, { method: 'PUT', token: 'user-a', query: { id }, body: { title: 'x', body: 'x' } }),
+      await call(restore.item, { method: 'POST', token: 'user-a', query: { id } }),
     ];
     for (const result of results) {
       assert.deepEqual([result.status, result.body], [403, { error: 'DEVICE_NOT_APPROVED' }]);
@@ -169,36 +177,38 @@ test('11단계: 승인되지 않은 기기(처음 보는·대기·회수)는 403
     }
   };
   await probe(); // never requested
-  await deviceStore.request(A, NEW_DEVICE);
+  await deviceStore.request(A, SA);
   await probe(); // pending
-  db.setStatus(A, NEW_DEVICE, 'revoked');
+  db.setStatus(A, SA, 'revoked');
   await probe(); // revoked
   assert.equal(calls(), 0);
   assert.deepEqual(await store.get(A, id), { id, title: 'A 비밀 제목', body: 'A 비밀 내용' });
 });
 
-test('11단계: 승인된 기기에서는 기존 화면의 메모 요청이 그대로 동작하고, 회수하면 다음 요청부터 막힌다', async () => {
+test('11단계: 승인된 세션에서는 기존 화면의 메모 요청이 그대로 동작하고, 새 로그인·다른 사용자·회수는 막힌다', async () => {
   const db = fakeDeviceDb();
   const deviceStore = createDeviceApprovalStore(db);
   const api = createNotesApi({ verify, store: memoryStore(), devices: deviceStore });
-  await deviceStore.request(A, NEW_DEVICE);
-  db.setStatus(A, NEW_DEVICE, 'approved');
-  const created = await call(api.collection, { method: 'POST', token: 'user-a', device: NEW_DEVICE, body: { title: '제목', body: '내용' } });
+  await deviceStore.request(A, SA);
+  db.setStatus(A, SA, 'approved');
+  const created = await call(api.collection, { method: 'POST', token: 'user-a', body: { title: '제목', body: '내용' } });
   assert.equal(created.status, 201);
   const { id } = created.body;
-  assert.deepEqual((await call(api.collection, { token: 'user-a', device: NEW_DEVICE })).body, [{ id, title: '제목', body: '내용' }]);
-  assert.deepEqual((await call(api.item, { method: 'PUT', token: 'user-a', device: NEW_DEVICE, query: { id }, body: { title: '새', body: '새 내용' } })).body,
+  assert.deepEqual((await call(api.collection, { token: 'user-a' })).body, [{ id, title: '제목', body: '내용' }]);
+  assert.deepEqual((await call(api.item, { method: 'PUT', token: 'user-a', query: { id }, body: { title: '새', body: '새 내용' } })).body,
     { id, title: '새', body: '새 내용' });
-  // The approval belongs to (A, device): B on the same device id is refused before ownership is even looked at.
-  assert.deepEqual((await call(api.item, { token: 'user-b', device: NEW_DEVICE, query: { id } })).body, { error: 'DEVICE_NOT_APPROVED' });
-  db.setStatus(A, NEW_DEVICE, 'revoked');
-  assert.equal((await call(api.collection, { token: 'user-a', device: NEW_DEVICE })).status, 403);
+  // A fresh login of the same user is a new session: it needs its own approval.
+  assert.deepEqual((await call(api.collection, { token: 'user-a-new-login' })).body, { error: 'DEVICE_NOT_APPROVED' });
+  // B is refused at the gate (B's session has no approval), before ownership is even looked at.
+  assert.deepEqual((await call(api.item, { token: 'user-b', query: { id } })).body, { error: 'DEVICE_NOT_APPROVED' });
+  db.setStatus(A, SA, 'revoked');
+  assert.equal((await call(api.collection, { token: 'user-a' })).status, 403);
 });
 
-test('11단계: 기기 승인 조회가 실패하면 자료 없이 502로 닫힌다', async () => {
+test('11단계: 승인 조회가 실패하면 자료 없이 502로 닫힌다', async () => {
   const { counted, calls } = countingStore();
   const api = createNotesApi({ verify, store: counted, devices: createDeviceApprovalStore(fakeDeviceDb({ fail: true })) });
-  const result = await call(api.collection, { token: 'user-a', device: NEW_DEVICE });
+  const result = await call(api.collection, { token: 'user-a' });
   assert.deepEqual([result.status, result.body], [502, { error: 'DEVICE_CHECK_UNAVAILABLE' }]);
   assert.equal(calls(), 0);
   assert.throws(() => createNotesApi({ verify, store: memoryStore() }), /device_store_required/u);
@@ -356,7 +366,7 @@ test('10단계: 만들고 → PUT으로 변조 → 복구하면 원래 내용이
 
 // S10_RESTORE_MISMATCH regression: restore only when id, owner and content hash all match the copy.
 const verifyMixed = async authorization => {
-  if (authorization === 'Bearer judge-b-upper') return { kind: 'judge', userId: B.toUpperCase(), runId: A, identity: 'b' };
+  if (authorization === 'Bearer judge-b-upper') return { kind: 'judge', userId: B.toUpperCase(), runId: SJ, identity: 'b', sessionId: SJ };
   return verify(authorization);
 };
 
@@ -581,7 +591,11 @@ test('10단계: 복구 재시험 도구의 정리는 restore_audit를 절대 지
   assert.equal(CLEANUP_TABLES.includes('restore_audit'), false);
 });
 
-test('11단계: 복구 재시험 도구는 임시 계정마다 승인된 기기를 만들어 그 계정의 요청에만 보낸다', async () => {
+// A JWT-shaped fake (unsigned) carrying only the claims the retest tool reads.
+const fakeJwt = claims => ['{"alg":"none"}', JSON.stringify(claims), 'sig']
+  .map((part, i) => (i < 2 ? Buffer.from(part).toString('base64url') : part)).join('.');
+
+test('11단계: 복구 재시험 도구는 각 임시 계정 토큰의 session_id를 승인하고 기기 값을 보내지 않는다', async () => {
   const inserts = [];
   const sent = [];
   let n = 0;
@@ -598,20 +612,73 @@ test('11단계: 복구 재시험 도구는 임시 계정마다 승인된 기기�
       return q;
     },
   };
+  const sessions = ['5E55105A-0000-4000-8000-000000000001', '5e55105a-0000-4000-8000-000000000002'];
   let t = 0;
   await runRetest({ app: new URL('https://example-app.vercel.app/'), domain: 'example.invalid' }, {
     admin, out: () => {},
-    newAuthClient: () => ({ auth: { signInWithPassword: async () => ({ data: { session: { access_token: `tok-${++t}` } }, error: null }) } }),
+    newAuthClient: () => ({ auth: { signInWithPassword: async () => ({
+      data: { session: { access_token: fakeJwt({ sub: 'x', session_id: sessions[t++] }) } }, error: null }) } }),
     fetchImpl: async (_url, init) => { sent.push(init.headers); return new Response('{}', { status: 401 }); },
   });
-  assert.deepEqual(inserts.map(([table, row]) => [table, row.owner_id, row.status]), [
-    ['device_approvals', '12345678-1234-4234-8234-123456789001', 'approved'],
-    ['device_approvals', '12345678-1234-4234-8234-123456789002', 'approved']]);
-  const deviceFor = Object.fromEntries(inserts.map(([, row], i) => [`Bearer tok-${i + 1}`, row.device_id]));
+  assert.deepEqual(inserts.map(([table, row]) => [table, row.owner_id, row.device_id, row.status]), [
+    ['device_approvals', '12345678-1234-4234-8234-123456789001', sessions[0].toLowerCase(), 'approved'],
+    ['device_approvals', '12345678-1234-4234-8234-123456789002', sessions[1], 'approved']]);
   assert.ok(sent.some(h => h.Authorization));
-  for (const headers of sent) {
-    assert.equal(headers['X-Device-Id'], headers.Authorization ? deviceFor[headers.Authorization] : undefined);
-  }
+  assert.ok(sent.every(h => Object.keys(h).every(k => ['Authorization', 'Content-Type'].includes(k))));
+});
+
+test('11단계: 토큰에 session_id가 없으면 재시험 도구는 승인 행을 만들지 않고 준비 실패로 멈춘다', async () => {
+  const inserts = [];
+  const lines = [];
+  const admin = {
+    auth: { admin: {
+      createUser: async () => ({ data: { user: { id: '12345678-1234-4234-8234-123456789001' } }, error: null }),
+      deleteUser: async () => ({ error: null }),
+    } },
+    from(table) {
+      const q = { insert: async row => { inserts.push([table, row]); return { error: null }; },
+        delete() { return q; }, select() { return q; }, in: async () => ({ error: null, count: 0 }) };
+      return q;
+    },
+  };
+  await runRetest({ app: new URL('https://example-app.vercel.app/'), domain: 'example.invalid' }, {
+    admin, out: line => lines.push(line),
+    newAuthClient: () => ({ auth: { signInWithPassword: async () => ({ data: { session: { access_token: fakeJwt({ sub: 'x' }) } }, error: null }) } }),
+    fetchImpl: async () => new Response('{}', { status: 401 }),
+  });
+  assert.deepEqual(inserts, []);
+  assert.ok(lines.some(l => l.startsWith('준비 실패') && l.includes('session_id')));
+});
+
+test('11단계: 로그인 검증기는 세션 번호를 검증된 토큰에서만 꺼낸다 (학생 session_id, 심판 aleph_run)', async () => {
+  const config = { judgeIssuer: 'https://judge.up.railway.app/defense/judge',
+    publicAppUrl: 'https://app-name.vercel.app',
+    identityProvider: { issuer: 'https://abcdefgh.supabase.co/auth/v1', audience: 'authenticated',
+      jwksUrl: 'https://abcdefgh.supabase.co/auth/v1/.well-known/jwks.json' } };
+  const studentIss = 'https://abcdefgh.supabase.co/auth/v1';
+  const base = { iss: studentIss, aud: 'authenticated', role: 'authenticated', sub: A,
+    exp: Math.floor(Date.now() / 1000) + 600 };
+  // getClaims stands in for Supabase's verification; it returns the claims for the given token.
+  const claimsFor = new Map();
+  const supabaseClient = { auth: { getClaims: async token => ({ data: { claims: claimsFor.get(token) }, error: null }) } };
+  const { privateKey, publicKey } = await generateKeyPair('ES256');
+  const verifyLogin = createLoginVerifier({ config, supabaseClient,
+    judgeKeySet: createLocalJWKSet({ keys: [{ ...(await exportJWK(publicKey)), alg: 'ES256' }] }) });
+  const withSession = fakeJwt({ iss: studentIss, n: 1 });
+  claimsFor.set(withSession, { ...base, session_id: 'ABCDEF01-2345-4678-89AB-CDEF01234567' });
+  assert.deepEqual(await verifyLogin(`Bearer ${withSession}`),
+    { kind: 'student', userId: A, sessionId: 'abcdef01-2345-4678-89ab-cdef01234567' });
+  const noSession = fakeJwt({ iss: studentIss, n: 2 });
+  claimsFor.set(noSession, { ...base });
+  assert.deepEqual(await verifyLogin(`Bearer ${noSession}`), { kind: 'student', userId: A, sessionId: null });
+  const badSession = fakeJwt({ iss: studentIss, n: 3 });
+  claimsFor.set(badSession, { ...base, session_id: 'not-a-uuid' });
+  assert.equal((await verifyLogin(`Bearer ${badSession}`)).sessionId, null);
+  const run = '7a7a7a7a-0000-4000-8000-000000000001';
+  const judge = await new SignJWT({ aleph_run: run, aleph_role: 'judge', aleph_identity: 'a' })
+    .setProtectedHeader({ alg: 'ES256' }).setIssuer(config.judgeIssuer).setAudience('app-name.vercel.app')
+    .setSubject(B).setIssuedAt().setExpirationTime('10m').sign(privateKey);
+  assert.equal((await verifyLogin(`Bearer ${judge}`)).sessionId, run);
 });
 
 test('로그인 검증기는 형식이 틀린 토큰과 알 수 없는 발급자를 거부한다', async () => {

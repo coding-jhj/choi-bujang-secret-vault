@@ -8,9 +8,9 @@ export function fakeDeviceDb({ fail = false } = {}) {
   const client = {
     rows,
     calls,
-    // Student's manual SQL Editor step, simulated: approve/revoke one (owner, device) row.
-    setStatus(ownerId, deviceId, status) {
-      const row = rows.find(r => r.owner_id === ownerId && r.device_id === deviceId);
+    // Student's manual SQL Editor step, simulated: approve/revoke one (owner, session) row.
+    setStatus(ownerId, sessionId, status) {
+      const row = rows.find(r => r.owner_id === ownerId && r.device_id === sessionId);
       if (!row) throw new Error('no such row');
       row.status = status;
     },

@@ -43,6 +43,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
+import { decodeJwt } from 'jose';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const FAKE_ID = '00000000-0000-4000-8000-000000000000';
@@ -103,15 +104,14 @@ export async function runRetest({ app, domain }, { admin, newAuthClient, fetchIm
   };
   const skip = (number, name, why) => record(number, name, false, `실행하지 못함 (${why})`);
 
-  // Step 11: data routes also need an approved device. Each throwaway user gets its own random
-  // device id, approved directly in device_approvals by the admin client at creation time (the
-  // same thing the student does by hand in the SQL Editor), and it is sent with that user's
-  // requests. Cross-account checks therefore still reach the owner check, as before step 11.
-  const deviceOf = new Map();
+  // Step 11: data routes also need an approved login session. The server takes the session from
+  // the verified token's session_id claim; nothing extra is sent. So right after each throwaway
+  // sign-in, the admin client approves THAT token's own session_id in device_approvals (the same
+  // thing the student does by hand in the SQL Editor). Cross-account checks therefore still reach
+  // the owner check, as before step 11.
   async function call(path, { token, method = 'GET', body } = {}) {
     const headers = {};
     if (token) headers.Authorization = `Bearer ${token}`;
-    if (token && deviceOf.has(token)) headers['X-Device-Id'] = deviceOf.get(token);
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     const response = await fetchImpl(new URL(path, app), {
       method, headers, body: body === undefined ? undefined : JSON.stringify(body),
@@ -175,11 +175,14 @@ export async function runRetest({ app, domain }, { admin, newAuthClient, fetchIm
     if (signIn.error || typeof token !== 'string') {
       throw new Error(`임시 계정 ${label} 로그인 실패: ${short(signIn.error?.message ?? '토큰 없음')}`);
     }
-    const device = randomUUID();
-    const approval = await admin.from('device_approvals')
-      .insert({ owner_id: id, device_id: device, status: 'approved', approved_at: new Date().toISOString() });
-    if (approval.error) throw new Error(`임시 계정 ${label} 기기 승인 행 생성 실패: ${short(approval.error.message)}`);
-    deviceOf.set(token, device);
+    // Our own token, just issued by Supabase to this script: reading its session_id without
+    // verifying is fine here (the server verifies it on every request anyway).
+    let session = null;
+    try { session = decodeJwt(token).session_id; } catch { session = null; }
+    if (!UUID.test(session ?? '')) throw new Error(`임시 계정 ${label} 토큰에 session_id가 없습니다`);
+    const approval = await admin.from('device_approvals').insert({ owner_id: id,
+      device_id: session.toLowerCase(), status: 'approved', approved_at: new Date().toISOString() });
+    if (approval.error) throw new Error(`임시 계정 ${label} 세션 승인 행 생성 실패: ${short(approval.error.message)}`);
     return token;
   }
 

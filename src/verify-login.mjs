@@ -74,8 +74,10 @@ export function createLoginVerifier({ config, supabaseSecretKey, judgeKeySet,
             || !['a', 'b'].includes(payload.aleph_identity)
             || !Number.isSafeInteger(payload.iat) || !Number.isSafeInteger(payload.exp)
             || payload.exp <= payload.iat || payload.exp - payload.iat > 900) return null;
+        // sessionId (step 11 device approval): the judge token has no Supabase session_id, so its
+        // signed per-run claim aleph_run (checked above) stands in. Server-derived, never client input.
         return Object.freeze({ kind: 'judge', userId: payload.sub,
-          runId: payload.aleph_run, identity: payload.aleph_identity });
+          runId: payload.aleph_run, identity: payload.aleph_identity, sessionId: payload.aleph_run.toLowerCase() });
       } catch { return null; }
     }
     if (issuer === bound.studentIssuer) {
@@ -89,7 +91,11 @@ export function createLoginVerifier({ config, supabaseSecretKey, judgeKeySet,
             || claims.role !== 'authenticated' || !UUID.test(claims.sub ?? '')
             || !Number.isSafeInteger(claims.exp)
             || claims.exp <= Math.floor(Date.now() / 1000)) return null;
-        return Object.freeze({ kind: 'student', userId: claims.sub });
+        // sessionId (step 11 device approval): Supabase's session_id claim of this verified token.
+        // It names one login session (auth.sessions row): token refreshes keep it, a new login
+        // gets a new one. Missing or malformed -> null, and the device gate then denies.
+        return Object.freeze({ kind: 'student', userId: claims.sub,
+          sessionId: UUID.test(claims.session_id ?? '') ? claims.session_id.toLowerCase() : null });
       } catch { return null; }
     }
     return null;

@@ -58,7 +58,7 @@ export function createNotesRestoreApi({ verify, store, devices }) {
       send(response, 405, { error: 'METHOD_NOT_ALLOWED' });
       return null;
     }
-    if (!(await requireApprovedDevice(devices, user, request, response))) return null;
+    if (!(await requireApprovedDevice(devices, user, response))) return null;
     return user;
   }
 

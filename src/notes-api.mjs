@@ -25,7 +25,7 @@ function readBody(request) {
 }
 
 // verify(authorization) -> { userId } | null.  store holds all database access.
-// devices.status(ownerId, deviceId) -> approval status (step 11). Required: see device-approval.mjs.
+// devices.status(ownerId, sessionId) -> approval status (step 11). Required: see device-approval.mjs.
 export function createNotesApi({ verify, store, devices }) {
   assertDeviceStore(devices);
   // Order: login (401) -> method (405) -> device approval (403) -> data. Every route of this
@@ -40,7 +40,7 @@ export function createNotesApi({ verify, store, devices }) {
       send(response, 405, { error: 'METHOD_NOT_ALLOWED' });
       return null;
     }
-    if (!(await requireApprovedDevice(devices, user, request, response))) return null;
+    if (!(await requireApprovedDevice(devices, user, response))) return null;
     return user;
   }
 

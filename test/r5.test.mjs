@@ -59,8 +59,7 @@ test('attack check records closed results only when requests are rejected as JSO
     assert.deepEqual(results.map(item => item.attackId), ['no_login_list', 'no_login_create',
       'forged_token_list', 'no_login_item_read', 'no_login_restore', 'no_login_announcements_list',
       'no_login_announcements_create', 'no_login_announcement_write',
-      'no_login_new_device_list', 'forged_token_new_device_list', 'no_login_device_request',
-      'no_login_device_status',
+      'no_login_device_request', 'forged_token_device_request', 'no_login_device_status',
       'original_api_no_key_read', 'original_api_no_key_write',
       'public_files_no_key', 'login_bad_credentials', 'public_data_json_read',
       'aleph_json_open', 'nosniff_header']);
@@ -76,7 +75,7 @@ test('attack check records closed results only when requests are rejected as JSO
     const byId = Object.fromEntries(open.map(item => [item.attackId, item.observed]));
     for (const id of ['no_login_list', 'no_login_create', 'forged_token_list', 'no_login_item_read',
       'no_login_restore', 'no_login_announcements_list', 'no_login_announcements_create', 'no_login_announcement_write',
-      'no_login_new_device_list', 'forged_token_new_device_list', 'no_login_device_request', 'no_login_device_status',
+      'no_login_device_request', 'forged_token_device_request', 'no_login_device_status',
       'original_api_no_key_read', 'original_api_no_key_write', 'login_bad_credentials',
       'public_data_json_read', 'nosniff_header']) {
       assert.ok(!/^(거부됨|열리지 않음|헤더 있음)/u.test(byId[id]), id);

@@ -171,7 +171,7 @@ export const CAMPAIGN_CASES = Object.freeze([
   c('S09-03', 9, 'local', 'detect(): 10분 안에 121건', 'propose_revocation / burst_read'),
   c('S10-01', 10, 'live', '로그인 없이 메모 복구', '401 LOGIN_REQUIRED'),
   c('S10-02', 10, 'live', "B'가 변조된 자기 메모를 복구", '200, 원본으로 돌아옴, 3값 대조 true, audit recorded (정상)'),
-  c('S10-03', 10, 'live', "A'가 B'의 메모를 복구", '404 NOT_FOUND, verification 값 전부 null'),
+  c('S10-03', 10, 'live', "A'가 B'의 메모를 복구", '404 NOT_FOUND, 대조값(backupId·backupSha256·idMatch·ownerMatch·hashMatch·persistedSha256)은 전부 null, rolledBack=false, audit=not_written'),
   c('S10-04', 10, 'live', "B'의 모든 시도 뒤 A'의 메모", '200, 원래 내용 그대로 (정상)'),
   c('S11-01', 11, 'live', '로그인 없이 본문에 approved를 넣은 승인 요청', '401 LOGIN_REQUIRED'),
   c('S11-02', 11, 'live', '위조 토큰 + 본문 approved 승인 요청', '401 LOGIN_REQUIRED'),

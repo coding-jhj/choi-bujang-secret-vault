@@ -488,9 +488,11 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
       else {
         try {
           const r = await call(`/api/notes/${idB}/restore`, { token: userA.token, method: 'POST', body: {} });
-          const v = r.json?.verification;
-          const allNull = v && Object.values(v).every(value => value === null);
-          record('S10-03', denied404(r) && allNull ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
+          const v = r.json?.verification ?? {};
+          const compareFieldsNull = ['backupId', 'backupSha256', 'idMatch', 'ownerMatch', 'hashMatch', 'persistedSha256']
+            .every(key => v[key] === null);
+          const ok = denied404(r) && compareFieldsNull && v.rolledBack === false && v.audit === 'not_written';
+          record('S10-03', ok ? 'pass' : 'fail', { status: r.status, observed: seen(r), vercelId: r.vercelId });
         } catch (error) { record('S10-03', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
       }
     }
@@ -623,18 +625,26 @@ export async function runCampaign({ app, originalApiUrl, domain }, { admin, newA
       } catch (error) { record('S12-02', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
     }
 
-    // S12-03: after restore, unsigned modify + out-of-zone read, sent together.
-    if (!userB || !idB) notRun('S12-03', !userB ? notReady : 'S10-02 복구 준비 실패');
+    // S12-03: after restore, two unsigned modify attempts (401 each, no login at all) plus two
+    // authenticated-but-forbidden reads (404 each: wrong owner, and wrong zone/service), sent
+    // together. "서명 없음" = no token at all; "구역 밖" = logged in, but the wrong owner or the
+    // wrong service for that resource — both must still land on the owner/zone check, not skip it.
+    if (!userA || !userB || !idB) notRun('S12-03', !userA || !userB ? notReady : 'S10-02 복구 준비 실패');
     else {
       try {
-        const [unsignedPut, crossZone] = await Promise.all([
+        const [unsignedNotesPut, unsignedAnnPut, wrongOwnerRead, wrongZoneRead] = await Promise.all([
           call(`/api/notes/${idB}`, { method: 'PUT', body: { title: 'x', body: 'x' } }),
-          call(`/api/announcements/${idB}`),
+          call(`/api/announcements/${idB}`, { method: 'PUT', body: { title: 'x', content: 'x' } }),
+          call(`/api/notes/${idB}`, { token: userA.token }),
+          call(`/api/announcements/${idB}`, { token: userA.token }),
         ]);
         const recheck = await call(`/api/notes/${idB}`, { token: userB.token });
-        const ok = loginRequired(unsignedPut) && denied404(crossZone) && recheck.status === 200 && sameNote(recheck, noteB);
+        const ok = loginRequired(unsignedNotesPut) && loginRequired(unsignedAnnPut)
+          && denied404(wrongOwnerRead) && denied404(wrongZoneRead)
+          && recheck.status === 200 && sameNote(recheck, noteB);
         record('S12-03', ok ? 'pass' : 'fail',
-          { observed: `무서명 수정 ${seen(unsignedPut)} / 구역 밖 조회 ${seen(crossZone)} / 재확인 ${seen(recheck)}` });
+          { observed: `무서명 수정(메모) ${seen(unsignedNotesPut)} / 무서명 수정(공지) ${seen(unsignedAnnPut)} / `
+            + `타인 조회 ${seen(wrongOwnerRead)} / 구역 밖 조회 ${seen(wrongZoneRead)} / 재확인 ${seen(recheck)}` });
       } catch (error) { record('S12-03', 'fail', { observed: `요청 실패: ${short(error.message)}` }); }
     }
   } finally {

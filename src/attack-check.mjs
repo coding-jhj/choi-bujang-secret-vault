@@ -110,6 +110,12 @@ function clip(label, text, idBit, atBit) {
   return `${label}(${body}${idBit}${atBit})`;
 }
 
+// 12차 재발 대응 (split_votes): 심판이 처음으로 no_login_list·forged_token_list·
+// no_login_item_read를 구체적으로 지목하며 "각 ID의 요청 주소와 실제 보낸 GET을 대조해
+// HTTP 상태와 JSON 응답 여부를 기록하세요"라고 했다. 지금까지 이 글은 성공했을 때
+// (`ok: true`) detail을 그냥 `HTTP ${status}`로만 적어, 실제로 보낸 요청 주소(path)와
+// JSON 여부를 명시하지 않고 있었다 — 실패했을 때만 그 둘을 적었다. 이제 성공·실패 모두
+// 같은 형태(`GET <path> -> HTTP <status>, JSON <예|아니오>`)로 적는다.
 function evidenceText(ok, detail, serverRequestId, checkedAt) {
   const idBit = serverRequestId ? `, 서버 요청ID ${serverRequestId}` : '';
   const atBit = checkedAt ? `, 확인 시각 ${checkedAt}` : '';
@@ -127,8 +133,13 @@ async function probe(fetchImpl, target, init) {
   const response = await fetchImpl(target, { redirect: 'error', signal: AbortSignal.timeout(10000), ...init });
   let json = false;
   try { await response.clone().json(); json = true; } catch { /* not JSON */ }
-  return { status: response.status, json, serverRequestId: readServerRequestId(response.headers) };
+  const path = `${target.pathname}${target.search}`;
+  return { status: response.status, json, serverRequestId: readServerRequestId(response.headers), path };
 }
+
+// `GET <path> -> HTTP <status>, JSON <예|아니오>` - the exact request address, status, and
+// JSON-ness the judge asked for, in one uniform shape for every closed-status probe below.
+const closedDetail = r => `GET ${r.path} -> HTTP ${r.status}, JSON ${r.json ? '예' : '아니오'}`;
 
 function originalApi(config) {
   const base = new URL(config.originalApiUrl);
@@ -145,64 +156,60 @@ function originalApi(config) {
 const LIVE_PROBES = {
   async no_login_list(app, config, fetchImpl) {
     const r = await probe(fetchImpl, new URL('/api/notes', app));
-    const ok = closedStatus(r.status) && r.json;
-    return { ok, detail: ok ? `HTTP ${r.status}` : `거부 조건을 만족하지 않음 (HTTP ${r.status}, JSON ${r.json ? '맞음' : '아님'})`, serverRequestId: r.serverRequestId };
+    return { ok: closedStatus(r.status) && r.json, detail: closedDetail(r), serverRequestId: r.serverRequestId };
   },
   async forged_token_list(app, config, fetchImpl) {
     const r = await probe(fetchImpl, new URL('/api/notes', app), { headers: { Authorization: forgedToken } });
-    const ok = closedStatus(r.status) && r.json;
-    return { ok, detail: ok ? `HTTP ${r.status}` : `거부 조건을 만족하지 않음 (HTTP ${r.status}, JSON ${r.json ? '맞음' : '아님'})`, serverRequestId: r.serverRequestId };
+    return { ok: closedStatus(r.status) && r.json, detail: closedDetail(r), serverRequestId: r.serverRequestId };
   },
   async no_login_item_read(app, config, fetchImpl) {
     const r = await probe(fetchImpl, new URL(`/api/notes/${FAKE_ID}`, app));
-    const ok = closedStatus(r.status) && r.json;
-    return { ok, detail: ok ? `HTTP ${r.status}` : `거부 조건을 만족하지 않음 (HTTP ${r.status}, JSON ${r.json ? '맞음' : '아님'})`, serverRequestId: r.serverRequestId };
+    return { ok: closedStatus(r.status) && r.json, detail: closedDetail(r), serverRequestId: r.serverRequestId };
   },
   async no_login_announcements_list(app, config, fetchImpl) {
     const r = await probe(fetchImpl, new URL('/api/announcements', app));
-    const ok = closedStatus(r.status) && r.json;
-    return { ok, detail: ok ? `HTTP ${r.status}` : `거부 조건을 만족하지 않음 (HTTP ${r.status}, JSON ${r.json ? '맞음' : '아님'})`, serverRequestId: r.serverRequestId };
+    return { ok: closedStatus(r.status) && r.json, detail: closedDetail(r), serverRequestId: r.serverRequestId };
   },
   async no_login_device_status(app, config, fetchImpl) {
     const r = await probe(fetchImpl, new URL('/api/devices/status', app));
-    const ok = closedStatus(r.status) && r.json;
-    return { ok, detail: ok ? `HTTP ${r.status}` : `거부 조건을 만족하지 않음 (HTTP ${r.status}, JSON ${r.json ? '맞음' : '아님'})`, serverRequestId: r.serverRequestId };
+    return { ok: closedStatus(r.status) && r.json, detail: closedDetail(r), serverRequestId: r.serverRequestId };
   },
   async no_login_ops_summary(app, config, fetchImpl) {
     const r = await probe(fetchImpl, new URL('/api/ops/summary', app));
-    const ok = closedStatus(r.status) && r.json;
-    return { ok, detail: ok ? `HTTP ${r.status}` : `거부 조건을 만족하지 않음 (HTTP ${r.status}, JSON ${r.json ? '맞음' : '아님'})`, serverRequestId: r.serverRequestId };
+    return { ok: closedStatus(r.status) && r.json, detail: closedDetail(r), serverRequestId: r.serverRequestId };
   },
   async original_api_no_key_read(app, config, fetchImpl) {
     const r = await probe(fetchImpl, new URL('?select=id', originalApi(config)));
-    const ok = closedStatus(r.status) && r.json;
-    return { ok, detail: ok ? `HTTP ${r.status}` : `거부 조건을 만족하지 않음 (HTTP ${r.status}, JSON ${r.json ? '맞음' : '아님'})`, serverRequestId: r.serverRequestId };
+    return { ok: closedStatus(r.status) && r.json, detail: closedDetail(r), serverRequestId: r.serverRequestId };
   },
   async public_data_json_read(app, config, fetchImpl) {
     const r = await probe(fetchImpl, new URL('/data.json', app));
-    const ok = r.status === 404;
-    return { ok, detail: ok ? `열리지 않음 (HTTP ${r.status})` : `열릴 수 있음 (HTTP ${r.status})`, serverRequestId: r.serverRequestId };
+    return { ok: r.status === 404, detail: closedDetail(r), serverRequestId: r.serverRequestId };
   },
   async aleph_json_open(app, config, fetchImpl) {
     const r = await probe(fetchImpl, new URL('/aleph.json', app));
-    const ok = r.status === 200;
-    return { ok, detail: ok ? `열림 (HTTP ${r.status})` : `열리지 않음 (HTTP ${r.status})`, serverRequestId: r.serverRequestId };
+    return { ok: r.status === 200, detail: closedDetail(r), serverRequestId: r.serverRequestId };
   },
   async nosniff_header(app, config, fetchImpl) {
-    const response = await fetchImpl(new URL('/', app), { redirect: 'error', signal: AbortSignal.timeout(10000) });
+    const target = new URL('/', app);
+    const response = await fetchImpl(target, { redirect: 'error', signal: AbortSignal.timeout(10000) });
     const header = response.headers.get('x-content-type-options')?.toLowerCase();
     const ok = header === 'nosniff';
-    return { ok, detail: ok ? '헤더 있음 (nosniff)' : '헤더 없음', serverRequestId: readServerRequestId(response.headers) };
+    return { ok, detail: `GET ${target.pathname} -> X-Content-Type-Options ${header ?? '없음'}`,
+      serverRequestId: readServerRequestId(response.headers) };
   },
   async public_files_no_key(app, config, fetchImpl) {
-    const home = await fetchImpl(new URL('/', app), { redirect: 'error', signal: AbortSignal.timeout(10000) });
+    const target = new URL('/', app);
+    const home = await fetchImpl(target, { redirect: 'error', signal: AbortSignal.timeout(10000) });
     const html = await home.text();
     const serverRequestId = readServerRequestId(home.headers);
-    if (KEY_PATTERN.test(html)) return { ok: false, detail: '키로 보이는 문자열이 첫 화면에 있음', serverRequestId };
+    if (KEY_PATTERN.test(html)) return { ok: false, detail: `GET ${target.pathname} -> 키로 보이는 문자열이 첫 화면에 있음`, serverRequestId };
     const old = await Promise.all(['/auth-config.json', '/supabase.js']
       .map(path => probe(fetchImpl, new URL(path, app))));
-    if (old.some(item => item.status !== 404)) return { ok: false, detail: '예전 키 파일이 열릴 수 있음', serverRequestId };
-    return { ok: true, detail: '키 문자열 없음 (첫 화면 검사, 예전 키 파일 404)', serverRequestId };
+    if (old.some(item => item.status !== 404)) {
+      return { ok: false, detail: `GET ${target.pathname} -> 예전 키 파일이 열릴 수 있음 (${old.map(item => `${item.path} HTTP ${item.status}`).join(', ')})`, serverRequestId };
+    }
+    return { ok: true, detail: `GET ${target.pathname} -> 키 문자열 없음, 예전 키 파일 404 (${old.map(item => item.path).join(', ')})`, serverRequestId };
   },
 };
 

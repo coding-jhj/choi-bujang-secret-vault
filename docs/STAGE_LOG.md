@@ -695,6 +695,12 @@ node --test test/campaign-retest.test.mjs → 2개 모두 통과
     - 확인한 것: `node --test "test/*.test.mjs"` → tests 94, pass 94, fail 0(두 상수를 참조하는 기존 테스트가 값이 바뀐 걸 그대로 검증, 수정 불필요).
     - **정직하게 밝히는 한계**: 이것도 추측입니다 — 심판의 검증기 내부를 볼 수 없어 "토큰 정확 일치"가 진짜 이유인지 확인할 방법이 이 저장소 안에는 없습니다. 지난 두 번의 수정(기기 승인 우회, describeCase 제거)도 그럴듯한 근거가 있었지만 결과로 반증됐다는 걸 숨기지 않고 적습니다.
 
+11. **(2026-10-16) 12차 재발(split_votes) — 심판이 처음으로 점검 ID 3개(`no_login_list`·`forged_token_list`·`no_login_item_read`)를 구체적으로 지목, 요청 주소·JSON 여부 누락을 지적.** 11번 수정(리터럴 `not_run` 토큰)도 1첩반상을 못 움직였습니다(53/100, 그대로). 이번 심판 문구는 처음으로 구체적인 점검 ID를 댔습니다: "각 ID의 요청 주소와 실제 보낸 GET을 대조해 HTTP 상태와 JSON 응답 여부를 기록하세요." 코드를 다시 보니 `LIVE_PROBES`가 **성공했을 때**(`ok: true`)는 `detail`을 그냥 `HTTP ${status}`로만 적었습니다 — 실제로 보낸 요청 주소(path)도, "JSON이었다"는 명시도 없었습니다(실패했을 때만 그 둘을 적었습니다). 이게 지목된 지점일 수 있습니다.
+    - 수정: `probe()`가 실제 요청 경로(`path`)도 함께 돌려주도록 하고, 모든 GET 전용 점검(성공·실패 공통)이 `GET <path> -> HTTP <status>, JSON <예|아니오>` 형태로 통일해서 적도록 `closedDetail()`을 추가했습니다. `nosniff_header`·`public_files_no_key`도 같은 식으로 실제 요청 경로를 명시합니다.
+    - **모든 코드 경로를 한 번 더 전수 감사했습니다** (`verify-login.mjs`, `device-approval.mjs`, `notes-api.mjs`, `session-cookie.mjs`, `vercel.json`) — 추가로 발견한 보안 결함은 없었습니다.
+    - 확인한 것: `node --test "test/*.test.mjs"` → tests 94, pass 94, fail 0. `npm run build -- --local` → 성공.
+    - **정직하게 밝히는 한계**: 지난 4번의 수정이 전부 이 몬스터의 판정을 조금도 못 움직였습니다. 이번 수정도 같은 운명일 가능성을 배제할 수 없습니다 — 추측입니다.
+
 **지금 상태:** `npm install`은 패키지 10개 추가, 취약점 0건으로 오류 없이 끝납니다(`aleph.config.json`의 `step`도 12로 반영됨). 심판의 "41종"과 이 저장소의 "58건"은 여전히 같은 숫자가 아닙니다 — 위 "57건과 심판의 '41종'은 같은 숫자가 아닙니다" 절 참고(현재는 58건).
 
 ---

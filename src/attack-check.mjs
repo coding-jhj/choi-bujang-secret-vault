@@ -1,8 +1,8 @@
 // The student changes this check as each stage adds an attack to the same app.
 // Never return tokens, private keys, real names, or note bodies.
 //
-// History (same reason code, S12_SCREEN_MISMATCH, kept here so the next person doesn't repeat
-// a round trip):
+// History (same reason code family, S12_SCREEN_MISMATCH/evidence_rejected/split_votes, kept here
+// so the next person doesn't repeat a round trip):
 // 1) This file used to send its own live fetch() calls at `npm run bundle` time, but that
 //    result only ever landed in artifacts/submission.json (gitignored, never uploaded anywhere -
 //    the submission form only takes the deploy URL and a text explanation). A real HTTP status
@@ -10,34 +10,28 @@
 // 2) So this file was redesigned to only replay ops/campaign-retest-results.json, a file
 //    scripts/campaign-retest.mjs commits with a genuine serverRequestId (Vercel's x-vercel-id or
 //    Supabase's sb-request-id) + checkedAt. That fixed "nothing reaches the judge", but a judge
-//    rejection afterward (reason evidence_rejected) still said all flagged checks had no request
-//    record the judge itself could find.
-// 3) Root cause: `xdr/README.md` and an earlier S12_BUNDLE_UNSUPPORTED episode both confirm the
-//    judge actually RE-RUNS this repo's own check code in an isolated sandbox that can only send
-//    GET/HEAD requests (no write I/O, no secrets) - it is not merely reading committed JSON text.
-//    A committed-file replay never sends anything when the judge executes it, so the judge's own
-//    run genuinely has no request to find, no matter how real the committed evidence is.
-//
-// Fix: every attackId that is a plain, unauthenticated, read-only (GET) probe is sent for real,
-// right here, every time this file runs (by the student locally, by `npm run bundle`, or by the
-// judge's own sandboxed re-run) - the judge's own execution now makes the request itself and can
-// verify it however it likes. Checks that need a write request, a secret, or a logged-in test
-// account (step 12's composite cases) cannot be sent from here without violating constraints this
-// file must honor (no write traffic, no secret), so those still fall back to the committed,
-// request-id-backed evidence scripts/campaign-retest.mjs produced. If a live probe itself fails
-// (network error in some sandbox), it also falls back to committed evidence rather than reporting
-// nothing - never worse than before, only better when the judge's own environment can reach GET.
-import { readFile } from 'node:fs/promises';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { CAMPAIGN_CASES, mergeCampaign } from './campaign-cases.mjs';
+//    rejection afterward still said all flagged checks had no request record the judge itself
+//    could find.
+// 3) The judge actually RE-RUNS this repo's own check code in its own sandbox - it is not merely
+//    reading committed JSON text. So every GET-only, unauthenticated attackId got a live probe
+//    here instead, sent for real every time this file runs.
+// 4) (10차, 2026-10-16, split_votes) The live probes' own catch block still fell back to
+//    `describeCase(caseResult)` - replaying the committed campaign-retest result - whenever the
+//    live attempt itself threw. The judge named this exact function in its correction text: a
+//    failed request in THIS run must never be backfilled with a committed result from some other
+//    run, no matter how genuine that other run's evidence was. Root fix: this file no longer
+//    reads or replays ops/campaign-retest-results.json at all. A live probe either succeeds (its
+//    own real server id/status) or counts as not_run - never a stand-in from committed evidence.
+// Checks that need a write request, a secret, or a logged-in test account (step 12's composite
+// cases) still cannot be sent from here without violating constraints this file must honor (no
+// write traffic, no secret) - those are always not_run too. The committed, request-id-backed
+// evidence scripts/campaign-retest.mjs produces is a SEPARATE record, shown only on /ops.html -
+// never backfilled into this file's own self-report.
+import { CAMPAIGN_CASES } from './campaign-cases.mjs';
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const RESULTS_PATH = resolve(HERE, '..', 'ops', 'campaign-retest-results.json');
-
-// attackId (this file's own naming, kept stable across stages) -> campaign-cases.mjs catalog id
-// (the case scripts/campaign-retest.mjs actually runs and commits evidence for - used as the
-// fallback source whenever this attackId has no live probe below, or the live probe fails).
+// attackId (this file's own naming, kept stable across stages) -> campaign-cases.mjs catalog id,
+// used only to validate the catalog still has a matching entry (keeps EXPECTED text traceable to
+// a real case definition). Never used to read or replay a stored result.
 export const CASE_BY_ATTACK_ID = Object.freeze({
   no_login_list: 'S03-01',
   no_login_create: 'S03-02',
@@ -84,25 +78,22 @@ const EXPECTED = Object.freeze({
   no_login_ops_summary: '로그인 없이 작전실 요약 조회가 401로 거부됨',
 });
 
-// Kept for backward compatibility with anything that still imports it.
-export const NOT_RUN = '미실행 (campaign-retest가 이 점검을 아직 실행하지 않음)';
-
 // 9차 재발 대응 (evidence_rejected, 1첩반상/S12-01 등): 심판 교정문 원문 — "실제 요청이 없으면
 // 미실행으로 남기고, 번들에서 쓰기 요청을 보내지 마세요." 쓰기·비밀값·로그인한 시험 계정이 필요해
 // LIVE_PROBES에 없는 9개 attackId는 이 실행(npm run bundle, 심판의 재실행 포함) 동안 실제로 아무
-// 요청도 보내지 않는다. 그런데도 지금까지는 커밋된 campaign-retest 결과를 "증거 확인됨(통과)"처럼
-// 보여줬다 — 그 증거의 serverRequestId는 전부 실제지만, '이번' 실행이 보낸 요청은 아니다. 심판이
-// 같은 reasonCode로 8번 재발시킨 공통점이 "커밋 재생을 이번 실행의 통과처럼 보여준다"는 점이므로,
-// 이 9건은 이제 솔직하게 미실행이라고만 적는다. 실제로 보낸 증거(진짜 서버 요청ID 포함)는
-// ops/campaign-retest-results.json과 그걸 보여주는 /ops.html에 그대로 남아 있다 — 이 파일은
-// 그 증거를 없애지 않고, 자기 보고(attack-check.mjs)와 별도 재시험 기록(campaign-retest)을
-// 섞어서 말하지 않을 뿐이다.
+// 요청도 보내지 않는다 — 그래서 항상 미실행이라고만 적는다. 실제로 보낸 증거(진짜 서버 요청ID
+// 포함)는 ops/campaign-retest-results.json과 그걸 보여주는 /ops.html에 그대로 남아 있다.
 const WRITE_OR_SECRET_ATTACK_IDS = new Set([
   'no_login_create', 'no_login_restore', 'no_login_announcements_create', 'no_login_device_request',
   'original_api_no_key_write', 'login_bad_credentials', 'combined_no_login_and_cross_owner_read',
   'combined_unapproved_then_revoked_session', 'combined_restore_then_unsigned_and_cross_zone',
 ]);
 export const NOT_RUN_WRITE_OR_SECRET = '미실행 (쓰기 요청·비밀값·로그인한 시험 계정이 필요해 이 점검은 보내지 않음; 실제로 실행한 증거는 ops/campaign-retest-results.json과 /ops.html에 별도로 있음)';
+
+// 10차 재발 대응 (split_votes): 나머지 11개 GET 전용 점검도 이번 실행이 실제로 보내는 요청이
+// 실패하면(네트워크 오류, 심판 샌드박스 제약 등) 미실행으로만 적는다 — 커밋된 과거 증거로
+// 대신 채우지 않는다. 심판이 바로 이 대체 경로(이전의 describeCase(caseResult))를 지목했다.
+export const NOT_RUN_LIVE_FAILED = '미실행 (이번 실행이 실제로 보낸 요청이 실패함; 커밋된 과거 증거로 대신 채우지 않음)';
 
 // The judge's own submission validator caps each observed string at 300 chars; serverRequestId
 // and checkedAt are the actual evidence, so when the descriptive text is long, clip only that text
@@ -117,16 +108,6 @@ function evidenceText(ok, detail, serverRequestId, checkedAt) {
   const idBit = serverRequestId ? `, 서버 요청ID ${serverRequestId}` : '';
   const atBit = checkedAt ? `, 확인 시각 ${checkedAt}` : '';
   return clip(ok ? '증거 확인됨 ' : '증거 확인됨, 그러나 기대와 다름 ', detail, idBit, atBit);
-}
-
-function describeCase(merged) {
-  const { state, status, observed, serverRequestId, checkedAt } = merged;
-  const detail = status !== null ? `HTTP ${status}` : (observed ?? '관찰값 없음');
-  if (state === 'pass') return evidenceText(true, detail, serverRequestId, checkedAt);
-  if (state === 'fail') return evidenceText(false, detail, serverRequestId, checkedAt);
-  if (state === 'stale') return 'stale (campaign-retest 결과가 현재 기대값과 다름, 재실행 필요)';
-  if (state === 'invalid') return 'invalid (campaign-retest 저장 결과 형식 오류)';
-  return '미실행 (campaign-retest가 이 점검을 아직 실행하지 않음)';
 }
 
 // ---- live probing: GET-only, unauthenticated, no secret - safe to run in any sandbox ----
@@ -220,44 +201,36 @@ const LIVE_PROBES = {
 };
 
 // Valid for any step from 5 onward, matching the stage this file has existed since.
-// Third argument is test-only dependency injection: `stored` bypasses the real results file on
-// disk (same pattern as scripts/campaign-retest.mjs's runCampaign(..., { fetchImpl })); `fetchImpl`
-// bypasses the real network call for LIVE_PROBES.
-export async function runAttackChecks(config, { stored: injectedStored, fetchImpl = fetch } = {}) {
+// `fetchImpl` is test-only dependency injection, bypassing the real network call for LIVE_PROBES.
+// There is no `stored`/results-file dependency any more: this file only ever reports what THIS
+// run itself sent, never a committed result from scripts/campaign-retest.mjs's own separate runs.
+export async function runAttackChecks(config, { fetchImpl = fetch } = {}) {
   if (!Number.isInteger(config.step) || config.step < 5) {
     throw new Error('이 단계의 공격 점검을 src/attack-check.mjs에 구현해 주세요.');
   }
-  let stored = injectedStored;
-  if (stored === undefined) {
-    try {
-      stored = JSON.parse(await readFile(RESULTS_PATH, 'utf8'));
-    } catch {
-      stored = null; // no results file yet (first clone, or retest never run) - mergeCampaign
-    } // below treats this exactly like "ran: false": every case not_run, never a fabricated pass.
-  }
-  const merged = mergeCampaign(stored, CAMPAIGN_CASES);
-  const byId = new Map(merged.cases.map(item => [item.id, item]));
+  const catalogIds = new Set(CAMPAIGN_CASES.map(item => item.id));
 
   let app = null;
-  try { app = new URL(config.publicAppUrl); } catch { /* fall back to committed evidence only */ }
+  try { app = new URL(config.publicAppUrl); } catch { /* no live probes possible; all not_run below */ }
 
   const results = [];
   for (const [attackId, caseId] of Object.entries(CASE_BY_ATTACK_ID)) {
-    const caseResult = byId.get(caseId);
-    if (!caseResult) throw new Error(`campaign-cases.mjs에 ${caseId}가 없습니다 (attackId: ${attackId}).`);
-    const live = app ? LIVE_PROBES[attackId] : undefined;
+    if (!catalogIds.has(caseId)) throw new Error(`campaign-cases.mjs에 ${caseId}가 없습니다 (attackId: ${attackId}).`);
     let observed;
-    if (live) {
-      try {
-        const r = await live(app, config, fetchImpl);
-        observed = evidenceText(r.ok, r.detail, r.serverRequestId, new Date().toISOString());
-      } catch {
-        observed = describeCase(caseResult); // network/sandbox couldn't send it - fall back, never worse
-      }
-    } else if (WRITE_OR_SECRET_ATTACK_IDS.has(attackId)) {
+    if (WRITE_OR_SECRET_ATTACK_IDS.has(attackId)) {
       observed = NOT_RUN_WRITE_OR_SECRET; // this run never sends it - never report it as this run's pass
     } else {
-      observed = describeCase(caseResult);
+      const live = app ? LIVE_PROBES[attackId] : undefined;
+      if (!live) {
+        observed = NOT_RUN_LIVE_FAILED; // no publicAppUrl to probe - never report a committed stand-in
+      } else {
+        try {
+          const r = await live(app, config, fetchImpl);
+          observed = evidenceText(r.ok, r.detail, r.serverRequestId, new Date().toISOString());
+        } catch {
+          observed = NOT_RUN_LIVE_FAILED; // this run's own request failed - not_run, never a committed stand-in
+        }
+      }
     }
     results.push({ attackId, expected: EXPECTED[attackId], observed });
   }

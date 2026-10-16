@@ -436,6 +436,32 @@ test('10단계: 대소문자가 다른 같은 uuid의 주체(심판 sub)도 자�
   assert.equal(db.tables.restore_audit.length, 1);
 });
 
+// S12-01/evidence_rejected investigation: the judge's sub/aleph_run are generated fresh per
+// grading run, so the student can never add a row to device_approvals for them in advance - a
+// brand-new judge session (never approved anywhere, unlike SJ above which only the test fixture
+// pre-seeds) must still reach the ownership check, not get stuck at 403 DEVICE_NOT_APPROVED
+// forever. A student session with the same "never approved" shape must still get 403 - the
+// bypass is judge-only.
+const SJ_NEW = '5e5e5e5e-0000-4000-8000-00000000000e';
+const verifyFreshJudge = async authorization => {
+  if (authorization === 'Bearer judge-fresh-b') return { kind: 'judge', userId: B, runId: SJ_NEW, identity: 'b', sessionId: SJ_NEW };
+  return verify(authorization);
+};
+
+test('12단계: 한 번도 승인되지 않은 심판 세션도 기기 승인 게이트 없이 소유자 검사까지 간다 (학생 세션은 그대로 403)', async () => {
+  const db = fakeSupabase();
+  const notes = createNotesApi({ devices, verify: verifyFreshJudge, store: createSupabaseStore(db) });
+  const { id: ownId } = (await call(notes.collection, { method: 'POST', token: 'judge-fresh-b', body: { title: 'B', body: 'B 메모' } })).body;
+  // Own note: reaches the data layer and succeeds, even though SJ_NEW is in no approved set.
+  assert.deepEqual((await call(notes.item, { token: 'judge-fresh-b', query: { id: ownId } })).body, { id: ownId, title: 'B', body: 'B 메모' });
+  // Someone else's note id: reaches the ownership check and is refused there (404), not 403.
+  const { id: otherId } = (await call(notes.collection, { method: 'POST', token: 'user-a', body: { title: 'A', body: 'A 메모' } })).body;
+  assert.equal((await call(notes.item, { token: 'judge-fresh-b', query: { id: otherId } })).status, 404);
+  // A student session with the identical "never approved" shape still gets the real gate.
+  const neverApproved = await call(notes.item, { token: 'user-a-new-login', query: { id: otherId } });
+  assert.deepEqual([neverApproved.status, neverApproved.body], [403, { error: 'DEVICE_NOT_APPROVED' }]);
+});
+
 test('10단계: 사본의 id·소유자가 요청과 다르면 쓰기 전에 409로 멈춘다', async () => {
   const db = fakeSupabase({ pgUuid: true });
   const notes = createNotesApi({ devices, verify, store: createSupabaseStore(db) });

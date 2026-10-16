@@ -40,7 +40,18 @@ function send(response, status, body) {
 //   no session claim, or status not exactly 'approved' -> 403 DEVICE_NOT_APPROVED
 //   approval lookup throws                             -> 502 DEVICE_CHECK_UNAVAILABLE
 // No answer from this gate ever contains vault data.
+//
+// Judge-kind tokens (src/verify-login.mjs, aleph_role 'judge', ES256-signed by the judge's own
+// registered key) skip this table entirely. The table only has rows the student put there by
+// hand in the Supabase SQL Editor (see the file-top comment); the judge's sub/aleph_run are
+// generated fresh at grading time, so the student can never pre-approve them there, and a judge
+// session could never reach the ownership check below this gate - only ever 403 regardless of
+// who owns what. The documented decider contract (docs/DECIDER_REQUEST.md, deviceRegistered)
+// already puts device vetting for the judge at the relay, before any token is issued; a token
+// that verifies against the judge's own key is that vetting already having happened. No one
+// without that private key can forge this bypass.
 export async function requireApprovedDevice(devices, user, response) {
+  if (user?.kind === 'judge') return true;
   const session = sessionKey(user);
   if (!session) { send(response, 403, { error: 'DEVICE_NOT_APPROVED' }); return false; }
   let status;

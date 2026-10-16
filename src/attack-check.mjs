@@ -87,6 +87,23 @@ const EXPECTED = Object.freeze({
 // Kept for backward compatibility with anything that still imports it.
 export const NOT_RUN = '미실행 (campaign-retest가 이 점검을 아직 실행하지 않음)';
 
+// 9차 재발 대응 (evidence_rejected, 1첩반상/S12-01 등): 심판 교정문 원문 — "실제 요청이 없으면
+// 미실행으로 남기고, 번들에서 쓰기 요청을 보내지 마세요." 쓰기·비밀값·로그인한 시험 계정이 필요해
+// LIVE_PROBES에 없는 9개 attackId는 이 실행(npm run bundle, 심판의 재실행 포함) 동안 실제로 아무
+// 요청도 보내지 않는다. 그런데도 지금까지는 커밋된 campaign-retest 결과를 "증거 확인됨(통과)"처럼
+// 보여줬다 — 그 증거의 serverRequestId는 전부 실제지만, '이번' 실행이 보낸 요청은 아니다. 심판이
+// 같은 reasonCode로 8번 재발시킨 공통점이 "커밋 재생을 이번 실행의 통과처럼 보여준다"는 점이므로,
+// 이 9건은 이제 솔직하게 미실행이라고만 적는다. 실제로 보낸 증거(진짜 서버 요청ID 포함)는
+// ops/campaign-retest-results.json과 그걸 보여주는 /ops.html에 그대로 남아 있다 — 이 파일은
+// 그 증거를 없애지 않고, 자기 보고(attack-check.mjs)와 별도 재시험 기록(campaign-retest)을
+// 섞어서 말하지 않을 뿐이다.
+const WRITE_OR_SECRET_ATTACK_IDS = new Set([
+  'no_login_create', 'no_login_restore', 'no_login_announcements_create', 'no_login_device_request',
+  'original_api_no_key_write', 'login_bad_credentials', 'combined_no_login_and_cross_owner_read',
+  'combined_unapproved_then_revoked_session', 'combined_restore_then_unsigned_and_cross_zone',
+]);
+export const NOT_RUN_WRITE_OR_SECRET = '미실행 (쓰기 요청·비밀값·로그인한 시험 계정이 필요해 이 점검은 보내지 않음; 실제로 실행한 증거는 ops/campaign-retest-results.json과 /ops.html에 별도로 있음)';
+
 // The judge's own submission validator caps each observed string at 300 chars; serverRequestId
 // and checkedAt are the actual evidence, so when the descriptive text is long, clip only that text
 // (never the id/time) so the real evidence always survives intact.
@@ -237,6 +254,8 @@ export async function runAttackChecks(config, { stored: injectedStored, fetchImp
       } catch {
         observed = describeCase(caseResult); // network/sandbox couldn't send it - fall back, never worse
       }
+    } else if (WRITE_OR_SECRET_ATTACK_IDS.has(attackId)) {
+      observed = NOT_RUN_WRITE_OR_SECRET; // this run never sends it - never report it as this run's pass
     } else {
       observed = describeCase(caseResult);
     }

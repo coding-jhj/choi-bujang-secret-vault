@@ -670,6 +670,13 @@ node --test test/campaign-retest.test.mjs → 2개 모두 통과
    - **구조적 문제도 발견**: 증거 파일을 커밋하는 순간 그 커밋 자체가 새 SHA를 만들기 때문에, `ops/campaign-retest-results.json`의 `deployedCommit`이 그 파일을 담은 커밋과 영원히 한 커밋씩 어긋나 있었습니다(`localDirty: true` 상태에서 재시험을 돌리고 코드와 증거를 같은 커밋에 섞은 것도 원인). 커밋 순서를 "코드만 커밋·push → 배포 확인 → 깨끗한 트리에서 재시험 → 증거만 별도 커밋"으로 바꿔, `deployedCommit === localCommit`(증거 커밋의 부모)·`localDirty: false`가 되도록 고쳤습니다(커밋 `ba65680` 코드 + `0f9ee5c` 증거).
    - 재시험 결과: 58건 중 57건 통과 유지, 18개 attackId 전부 HTTP 상태·서버 요청ID·확인 시각 완비. 테스트 92→94개.
 
+**기록 공백:** 이후 실제 재발 대응(커밋 `531ff88`·`daee818`·`e984029`·`dd070df`, 커밋 메시지 기준 5~8차 재발)은 이 문서에 각 항목으로 아직 옮기지 못했습니다 — `git log --oneline`의 해당 커밋 메시지가 1차 근거입니다. 요지만 적으면: `daee818`은 S12-01/02/03/06(12단계 합성·작전실 공격)이 attack-check.mjs에 전혀 보고되지 않던 버그를 고쳤고, `dd070df`는 "심판이 실제로 이 코드를 자기 샌드박스에서 재실행하며, GET/HEAD만 보낼 수 있다"는 전제로 GET 전용 무인증 점검 10여 건을 커밋 재생 대신 그 순간 실제 fetch로 바꿨습니다(현재 `src/attack-check.mjs`의 `LIVE_PROBES`).
+
+7. **(2026-10-16) 9차 재발 대응 — 쓰기·복합 공격 9건을 "미실행"으로 고정.** `dd070df`가 GET 전용 10여 건을 실시간화한 뒤에도, 로그인·쓰기·비밀값이 필요해 `LIVE_PROBES`에 없는 9개 attackId(`no_login_create`·`no_login_restore`·`no_login_announcements_create`·`no_login_device_request`·`original_api_no_key_write`·`login_bad_credentials`·`combined_no_login_and_cross_owner_read`[1첩반상/S12-01]·`combined_unapproved_then_revoked_session`[S12-02]·`combined_restore_then_unsigned_and_cross_zone`[S12-03])는 여전히 커밋된 `ops/campaign-retest-results.json`을 "증거 확인됨(통과)"처럼 재생하고 있었습니다. 그 증거의 `serverRequestId`는 실제 값이지만, **이번 실행**이 보낸 요청은 아니었습니다 — 심판이 1첩반상(S12-01)을 `evidence_rejected`로 다시 집은 화면이 바로 이 지점을 가리켰습니다. 심판 교정문 원문("실제 요청이 없으면 미실행으로 남기고, 번들에서 쓰기 요청을 보내지 마세요")을 그대로 따라, 이 9건을 항상 `미실행`으로만 보고하도록 고쳤습니다(`src/attack-check.mjs`의 `WRITE_OR_SECRET_ATTACK_IDS`). 이 9건의 실제 실행 증거(진짜 서버 요청ID 포함)는 `ops/campaign-retest-results.json`과 `/ops.html`에 그대로 남아 있습니다 — attack-check.mjs의 자기 보고와 섞어서 말하지 않을 뿐입니다.
+   - `test/r5.test.mjs` 2개 테스트를 이 동작에 맞춰 고쳤습니다: 이 9건은 커밋된 결과가 `pass`든 `fail`이든, fetch가 뭘 돌려주든 항상 `미실행`임을 검증합니다.
+   - 확인한 것: `node --test "test/*.test.mjs"` → tests 97, pass 97, fail 0. `npm run build -- --local` → 성공.
+   - 확인하지 못한 것: `npm run bundle`(실배포 라이브 요청)은 이번 수정 뒤 아직 실행하지 않았습니다. 실배포 캠페인 재시험(`scripts/campaign-retest.mjs`) 재실행과 그 증거 재커밋도 아직 하지 않았습니다 — 코드 커밋·배포 확인이 끝난 뒤 별도로 진행합니다.
+
 **지금 상태:** `npm install`은 패키지 10개 추가, 취약점 0건으로 오류 없이 끝납니다(`aleph.config.json`의 `step`도 12로 반영됨). 심판의 "41종"과 이 저장소의 "58건"은 여전히 같은 숫자가 아닙니다 — 위 "57건과 심판의 '41종'은 같은 숫자가 아닙니다" 절 참고(현재는 58건).
 
 ---

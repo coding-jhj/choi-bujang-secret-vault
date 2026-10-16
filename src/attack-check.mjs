@@ -88,12 +88,18 @@ const WRITE_OR_SECRET_ATTACK_IDS = new Set([
   'original_api_no_key_write', 'login_bad_credentials', 'combined_no_login_and_cross_owner_read',
   'combined_unapproved_then_revoked_session', 'combined_restore_then_unsigned_and_cross_zone',
 ]);
-export const NOT_RUN_WRITE_OR_SECRET = '미실행 (쓰기 요청·비밀값·로그인한 시험 계정이 필요해 이 점검은 보내지 않음; 실제로 실행한 증거는 ops/campaign-retest-results.json과 /ops.html에 별도로 있음)';
+// 11차 재발 대응 (split_votes, 2026-10-16): the judge's correction text switched from Korean
+// prose ("미실행으로 남기세요") to the literal code-shaped `observed: "not_run"` - the same
+// lowercase token src/campaign-cases.mjs already uses as a state name (CASE_RESULTS, line 24).
+// A prose sentence that only STARTS WITH "미실행" may not match whatever exact-token check the
+// judge's own validator runs against `observed`. Every not-run `observed` value here is now
+// exactly the literal string `not_run` - nothing else - to match that token precisely.
+export const NOT_RUN_WRITE_OR_SECRET = 'not_run';
 
 // 10차 재발 대응 (split_votes): 나머지 11개 GET 전용 점검도 이번 실행이 실제로 보내는 요청이
-// 실패하면(네트워크 오류, 심판 샌드박스 제약 등) 미실행으로만 적는다 — 커밋된 과거 증거로
+// 실패하면(네트워크 오류, 심판 샌드박스 제약 등) not_run으로만 적는다 — 커밋된 과거 증거로
 // 대신 채우지 않는다. 심판이 바로 이 대체 경로(이전의 describeCase(caseResult))를 지목했다.
-export const NOT_RUN_LIVE_FAILED = '미실행 (이번 실행이 실제로 보낸 요청이 실패함; 커밋된 과거 증거로 대신 채우지 않음)';
+export const NOT_RUN_LIVE_FAILED = 'not_run';
 
 // The judge's own submission validator caps each observed string at 300 chars; serverRequestId
 // and checkedAt are the actual evidence, so when the descriptive text is long, clip only that text

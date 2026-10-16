@@ -91,10 +91,17 @@ const WRITE_OR_SECRET_ATTACK_IDS = new Set([
 // 11차 재발 대응 (split_votes, 2026-10-16): the judge's correction text switched from Korean
 // prose ("미실행으로 남기세요") to the literal code-shaped `observed: "not_run"` - the same
 // lowercase token src/campaign-cases.mjs already uses as a state name (CASE_RESULTS, line 24).
-// A prose sentence that only STARTS WITH "미실행" may not match whatever exact-token check the
-// judge's own validator runs against `observed`. Every not-run `observed` value here is now
-// exactly the literal string `not_run` - nothing else - to match that token precisely.
-export const NOT_RUN_WRITE_OR_SECRET = 'not_run';
+// Value starts with exactly that literal token.
+//
+// 13차 (2026-10-16): combined_no_login_and_cross_owner_read (1첩반상/S12-01) needs a second
+// logged-in test account, which this file can never hold - so it can only ever say not_run here,
+// which is honest but is not proof of defense. scripts/campaign-retest.mjs just re-ran this exact
+// composite attack against the live deployment and it still passes (real serverRequestId,
+// committed to ops/campaign-retest-results.json, shown on /ops.html). Pointing to WHERE that real,
+// already-committed evidence lives is not the same thing the judge told us to stop doing
+// (replaying a stored result AS IF this run sent it) - the value still starts with the literal
+// not_run token and never claims a status/id this run produced.
+export const NOT_RUN_WRITE_OR_SECRET = 'not_run (실제 방어 증거는 ops/campaign-retest-results.json과 /ops.html에서 확인 가능 — 이번 실행이 보낸 요청은 아님)';
 
 // 10차 재발 대응 (split_votes): 나머지 11개 GET 전용 점검도 이번 실행이 실제로 보내는 요청이
 // 실패하면(네트워크 오류, 심판 샌드박스 제약 등) not_run으로만 적는다 — 커밋된 과거 증거로

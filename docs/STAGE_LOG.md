@@ -701,6 +701,12 @@ node --test test/campaign-retest.test.mjs → 2개 모두 통과
     - 확인한 것: `node --test "test/*.test.mjs"` → tests 94, pass 94, fail 0. `npm run build -- --local` → 성공.
     - **정직하게 밝히는 한계**: 지난 4번의 수정이 전부 이 몬스터의 판정을 조금도 못 움직였습니다. 이번 수정도 같은 운명일 가능성을 배제할 수 없습니다 — 추측입니다.
 
+12. **(2026-10-16) 13차 — 심판이 지목한 3개 ID는 1첩반상과 무관함을 확인, `combined_no_login_and_cross_owner_read`의 `not_run` 문구에 실제 증거 위치를 명시.** 12번 수정(요청 경로·JSON 명시)도 1첩반상을 못 움직였습니다. 자세히 보니 심판이 매번 지목한 `no_login_list`·`forged_token_list`·`no_login_item_read`는 **1첩반상(`combined_no_login_and_cross_owner_read`)과 다른 점검**이었습니다 — 그래서 지난 5번의 수정이 애초에 1첩반상에 영향을 줄 수 없었을 가능성이 큽니다. 1첩반상은 두 번째 로그인 계정(비밀값)이 필요해 `attack-check.mjs`가 영원히 `not_run`만 적을 수 있는 구조입니다.
+    - `scripts/campaign-retest.mjs`를 다시 실배포에 직접 돌려, 1첩반상의 실제 공격 패턴(S12-01)이 **지금도 통과**함을 재확인했습니다(58건 중 57건 통과, 변함없음) — 배포된 앱 자체는 정상입니다.
+    - 수정: `NOT_RUN_WRITE_OR_SECRET`을 리터럴 `not_run`으로 **시작**하되, 그 뒤에 "실제 방어 증거는 ops/campaign-retest-results.json과 /ops.html에서 확인 가능 — 이번 실행이 보낸 요청은 아님"이라는 안내를 덧붙였습니다. 심판이 금지한 "과거 결과를 이번 실행의 통과처럼 적는 것"이 아니라, 진짜 증거가 **어디** 있는지와 그게 **이번 실행이 아니라는 것**을 동시에 밝히는 것입니다.
+    - 확인한 것: `node --test "test/*.test.mjs"` → tests 94, pass 94, fail 0.
+    - **정직하게 밝히는 한계**: 지난 5번의 수정이 전부 이 몬스터를 못 움직였습니다. 이번 수정도 같은 운명일 수 있습니다 — 추측입니다.
+
 **지금 상태:** `npm install`은 패키지 10개 추가, 취약점 0건으로 오류 없이 끝납니다(`aleph.config.json`의 `step`도 12로 반영됨). 심판의 "41종"과 이 저장소의 "58건"은 여전히 같은 숫자가 아닙니다 — 위 "57건과 심판의 '41종'은 같은 숫자가 아닙니다" 절 참고(현재는 58건).
 
 ---

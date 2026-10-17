@@ -1,7 +1,7 @@
 # 단계별 작업 기록 (BYTE BACK 방어전 시작 틀 R5)
 
 > 이 문서는 1~12단계(와 앞으로 이어질 단계)의 상세 개발 일지입니다. 요약·소개는 루트 [README.md](../README.md)를 보세요.
-> **최신 단계: 12단계 (2026-10-17, 15차 `split_votes` 대응) — 탈환 작전실, `attack-check.mjs`의 `observed`를 영어 토큰(상태 + JSON 여부)만으로 축소.**
+> **최신 단계: 12단계 (2026-10-17, 16차 `split_votes` 대응) — 탈환 작전실, 실제 로그로 심판 동작을 확인한 뒤 attackId를 URL 쿼리에 싣고 `observed`에 보낸 전체 URL을 기록.**
 > 새 단계를 추가하는 방법은 이 파일 맨 아래를 보세요.
 
 이 저장소는 1단계에서 학생 본인이 GitHub 저장소와 Vercel 배포를 만드는 출발점입니다. 가상 메모는 2단계부터 저장소 파일이 아니라 학습용 Supabase 표에 있습니다. 실제 학생 자료, 토큰, 비밀키를 넣지 마세요.
@@ -725,6 +725,14 @@ node --test test/campaign-retest.test.mjs → 2개 모두 통과
     - 실측(배포 `bdc7e48` 대상, GET만): 11건 모두 영어 한 줄, 9건 `not_run`. 예: `GET /api/notes -> HTTP 401, JSON`, `GET /data.json -> HTTP 404, not JSON`, `GET /aleph.json -> HTTP 200, JSON`, `GET / -> HTTP 200, not JSON, X-Content-Type-Options: nosniff`.
     - 보류한 후보 원인(이번에 안 고침): 저장소 `aleph.config.json`의 `publicAppUrl`(omega 별칭)과 배포된 `/aleph.json`의 `publicAppUrl`(배포별 주소)이 다릅니다. 심판이 `/aleph.json` 쪽 주소로 요청을 기다린다면 우리 요청은 다른 호스트로 나가 0건이 됩니다. 또 Node의 `fetch`는 `HTTP_PROXY` 환경변수를 무시하므로 심판이 프록시로 요청을 기록하는 구조라면 보이지 않을 수 있습니다. 둘 다 `scripts/deployment-identity.mjs` 등 다른 파일을 건드려야 해서, 심판의 "다른 파일은 건드리지 마세요"에 따라 다음 판정문이 같을 때 손댑니다.
     - **정직하게 밝히는 한계**: 이것도 추측입니다. 다만 지난 15번은 모두 심판 문장에 없는 것을 더하는 수정이었고, 이번은 심판 문장에 있는 것만 남기는 첫 수정입니다. 재제출 결과로만 확인됩니다.
+
+15. **(2026-10-17) 16차 재발(split_votes) — 추측을 멈추고 Vercel·Supabase 실제 로그로 심판의 동작을 관측. 심판 환경이 요청 헤더를 지운다는 사실을 확인하고 attackId를 URL 쿼리에 실음.** 14번 수정(영어 토큰)도 판정을 못 움직였습니다(53/100, split_votes, 심판 문구 "심판 기록에 해당 `attackId`로 보낸 요청이 없어 … 요청마다 실제 보낸 요청과 ID를 연결하고"). 이번에는 코드를 고치기 전에 Vercel Logs(Live)와 Supabase API 로그를 켜 두고 재제출해 심판이 실제로 무엇을 하는지 봤습니다.
+    - **관측 사실(2026-10-17 21:23:50~57 KST, 배포 `572b454`)**: 1차 묶음으로 우리 `LIVE_PROBES` 순서 그대로 GET 13건이 omega 주소와 Supabase에 도착해 전부 기대한 상태(401/404/200)를 받았습니다(`/api/notes`, `/api/notes`(위조 토큰), `/api/notes/00000000-…`, `/api/announcements`, `/api/devices/status`, Supabase `/rest/v1/notes?select=id`, `/api/ops/summary` 등). 즉 **심판은 우리 `attack-check.mjs`를 실제로 실행하고, 요청은 실제로 나갑니다.** 이어서 2차 묶음으로 심판 자신의 GET 4건(`/api/notes`, `/api/devices/status`, `/api/devices/request`, `/api/ops/summary`, User-Agent `ALEPH-Defense-Judge/1 (read-only)`)이 왔고 전부 401로 거부됐습니다. 서버 방어는 정상입니다.
+    - **결정적 차이**: 1차 묶음(우리 코드) 요청에는 Vercel 로그에 User-Agent 항목이 아예 없고, Supabase에는 `null`로 찍혔습니다. 제가 로컬에서 같은 코드를 돌리면 Node 기본값 `node`가 찍힙니다. 즉 **심판 격리 환경은 우리 요청의 헤더를 자기 방식으로 다시 만들어 보냅니다.** 그렇다면 13차에 붙인 `X-Attack-Id` 헤더도 같은 자리에서 사라졌고, 심판 기록에는 "헤더 없는 GET"만 남아 attackId와 이어줄 표식이 없었습니다. 12차 심판 문구 "각 ID의 **요청 주소**와 실제 보낸 GET을 대조"와도 맞습니다. 심판은 URL로 대조합니다.
+    - **수정(`src/attack-check.mjs` 한 파일)**: `liveFetch()`가 모든 실시간 GET의 URL 쿼리에 `attackId=<attackId>`를 붙입니다(상수 `ATTACK_ID_QUERY`). Supabase 점검은 `?select=id&attackId=original_api_no_key_read`로 기존 쿼리 뒤에 덧붙입니다. `observed`는 **실제로 보낸 전체 URL**을 적습니다: `GET https://…/api/notes?attackId=no_login_list -> HTTP 401, JSON`. `public_files_no_key`만 300자 상한 때문에 호스트를 한 번 쓰고 뒤 두 요청은 경로+쿼리로 적습니다. `X-Attack-Id` 헤더는 유지, 9건 `not_run` 유지. 우리 API는 `attackId` 쿼리를 읽지 않으며(`query.id`·`query.action`만 읽음), Supabase는 키 검사에서 먼저 401을 돌려주므로 응답은 변하지 않음을 실측으로 확인했습니다.
+    - 테스트(`test/r5.test.mjs`, 10→12개): 기록된 모든 요청 URL의 `attackId` 쿼리 = 헤더 값 = 실시간 ID 집합, Supabase URL은 `select=id` 유지 + `attackId` 추가, 모든 실시간 `observed`가 실제로 fetch한 URL 문자열을 그대로 포함, 긴 호스트에서도 300자 이내, `originalApiUrl`에 쿼리가 이미 있으면 요청 없이 `not_run`. 변형 9가지(쿼리 누락, `select=id` 덮어쓰기, 경로만 표기 등)에서 테스트 실패 확인. `npm run test:r5` 12/12, `node --test "test/*.test.mjs"` 99/99.
+    - **정직하게 밝히는 한계**: 심판 기록 장치가 URL 쿼리를 보고 attackId를 연결하는지는 확인하지 못했습니다. 다만 이번 수정은 처음으로 심판 환경의 **실측 사실**(헤더 소실, URL 대조 문구, 요청은 실제로 도착)에 근거합니다. 재제출 결과로만 확인됩니다.
+    - 다시 확인하는 방법: Vercel Logs를 Live로 켜고 제출하면 1차 묶음 요청의 Request 열에 `?attackId=<점검 이름>`이 그대로 보입니다. 로컬 실측은 14번 항목의 명령과 같습니다.
 
 **지금 상태:** `npm install`은 패키지 10개 추가, 취약점 0건으로 오류 없이 끝납니다(`aleph.config.json`의 `step`도 12로 반영됨). 심판의 "41종"과 이 저장소의 "58건"은 여전히 같은 숫자가 아닙니다 — 위 "57건과 심판의 '41종'은 같은 숫자가 아닙니다" 절 참고(현재는 58건).
 

@@ -1,7 +1,7 @@
 # 단계별 작업 기록 (BYTE BACK 방어전 시작 틀 R5)
 
 > 이 문서는 1~12단계(와 앞으로 이어질 단계)의 상세 개발 일지입니다. 요약·소개는 루트 [README.md](../README.md)를 보세요.
-> **최신 단계: 12단계 (2026-10-17, 14차 `split_votes` 대응) — 탈환 작전실, 실시간 점검 요청에 `X-Attack-Id` 식별 헤더 부착.**
+> **최신 단계: 12단계 (2026-10-17, 15차 `split_votes` 대응) — 탈환 작전실, `attack-check.mjs`의 `observed`를 영어 토큰(상태 + JSON 여부)만으로 축소.**
 > 새 단계를 추가하는 방법은 이 파일 맨 아래를 보세요.
 
 이 저장소는 1단계에서 학생 본인이 GitHub 저장소와 Vercel 배포를 만드는 출발점입니다. 가상 메모는 2단계부터 저장소 파일이 아니라 학습용 Supabase 표에 있습니다. 실제 학생 자료, 토큰, 비밀키를 넣지 마세요.
@@ -716,6 +716,15 @@ node --test test/campaign-retest.test.mjs → 2개 모두 통과
     - **고치지 않은 것(알려진 남은 문제)**: `/api/ops/summary`의 `sameDeployment`는 "지금 배포 커밋 == 증거 파일의 `deployedCommit`" 정확 비교인데(`src/ops-api.mjs` 110~116행), 증거 파일은 그 파일을 담은 커밋 안에 번들돼 배포되므로 **구조적으로 true가 될 수 없고** `/ops.html`은 항상 "지금 배포와 다른 커밋 (다시 돌려야 함)"을 표시합니다(`public/ops.html` 164~165행). 심판이 이번에 "화면은 고치지 마세요"라고 했으므로 이번 회차에는 건드리지 않고 기록만 남깁니다. 후보 해법: (가) 문구를 두 커밋 값을 그대로 보여주는 식으로 바꾸기, (나) `vercel.json` `ignoreCommand`로 증거 전용 커밋의 배포를 건너뛰고 요약 API가 증거 파일을 공개 저장소에서 실시간으로 읽기.
     - 확인하지 못한 것: 심판이 이 헤더를 실제로 대조에 쓰는지는 재제출 결과로만 확인됩니다. 이 항목을 쓰는 시점에 실배포 재시험(`scripts/campaign-retest.mjs`)과 `npm run bundle`은 아직 돌리지 않았습니다 — 코드 커밋·배포 확인 뒤 깨끗한 트리에서 돌려 증거만 별도 저장점으로 커밋합니다.
     - 다시 확인하는 방법: `npm run test:r5`. 실측은 `node --input-type=module -e "import {readFile} from 'node:fs/promises'; import {runAttackChecks} from './src/attack-check.mjs'; const c=JSON.parse(await readFile('aleph.config.json','utf8')); for (const x of await runAttackChecks(c)) console.log(x.attackId,'|',x.observed);"` (GET만 보냄).
+
+14. **(2026-10-17) 15차 재발(split_votes) — 13번 수정(`X-Attack-Id` 헤더)도 판정을 전혀 못 움직임. 방향을 "더하기"에서 "빼기"로 바꿔 `observed`를 영어 토큰(상태 + JSON 여부)만으로 축소.** 재제출 결과는 53/100, 코드 `split_votes`, 지목 점검 11개(`no_login_list`·`forged_token_list`·`no_login_item_read` 등) 그대로였습니다. 이번 심판 문구: "작전실 화면은 그대로 두고 `src/attack-check.mjs`에서 해당 요청과 `observed`를 대조하세요. 실제로 보낸 요청만 HTTP 상태와 JSON 응답 여부를 기록하고, 보내지 않은 점검은 `not_run`으로 두세요. 과거 기록으로 메우거나 결과를 짐작하지 마세요. … 다른 파일과 작전실 화면은 건드리지 마세요." 요청에 식별자를 더한 13번 가설은 결과로 반증되었습니다.
+    - 단순하게 다시 본 사실: 천안호날두과자(S12-02)·양양송이버섯고양이(S12-03)는 `attack-check.mjs`에서 `not_run`인데 격파로 판정됩니다. 즉 괴물 격파 판정은 심판이 자기 토큰으로 배포 서버를 직접 공격해 내리는 것이고(재시험에서도 S12-01은 401 + 404로 막힘), 1첩반상만 떨어지는 이유는 그 앞 절반("무인증 조회")에 해당하는 실시간 점검 11건의 `observed`를 심판이 자기가 관측한 요청과 짝짓지 못해 표가 갈리기(split_votes) 때문으로 좁혀집니다.
+    - 가장 단순한 원인 후보: 심판은 세 번 연속 "HTTP 상태와 JSON 여부"만 요구했는데, 우리 `observed`는 한국어 접두어("증거 확인됨"), `[X-Attack-Id=…]` 표식, 서버 요청ID(숫자 수십 자리), 확인 시각(숫자 수십 자리)을 덧붙여 비교기에 잡음이 많았습니다. 서버 요청ID·확인 시각은 제작 2(campaign-retest 표)의 요구였는데 4차(6번 항목)에서 attack-check로 잘못 옮겨 왔습니다. 9건 `not_run`도 13차에서 "과거 기록 위치" 안내 문장이 다시 붙어 있었고, 이번 "과거 기록으로 메우지 마세요"는 그 문구를 가리키는 것으로 읽힙니다.
+    - 수정(`src/attack-check.mjs` 한 파일): 보낸 11건은 `GET <경로> -> HTTP <상태>, JSON` 또는 `…, not JSON`만 적습니다(예 `GET /api/notes -> HTTP 401, JSON`). `nosniff_header`는 뒤에 `, X-Content-Type-Options: <값|none>`, `public_files_no_key`는 세 GET을 `; `로 이어 적고 키 문자열 유무를 `key string absent|present`로 적습니다. 안 보낸 9건과 요청 실패는 정확히 `not_run`. "증거 확인됨", 헤더 표식, 서버 요청ID, 확인 시각, 한국어 문구를 전부 제거했습니다(`evidenceText`·`attackIdTag`·`closedDetail`·`readServerRequestId` 삭제). `X-Attack-Id` 요청 헤더 자체는 해롭지 않아 유지하되 `observed`에는 적지 않습니다. 300자 안전 상한은 유지합니다(`scripts/bundle.mjs`가 300자 초과를 거부).
+    - 테스트(`test/r5.test.mjs`, 8→10개): `no_login_list`의 `observed === 'GET /api/notes -> HTTP 401, JSON'` 정확 일치, 9건 `=== 'not_run'` 정확 일치, 실시간 11건 전부의 정확한 문구 표, 모든 `observed`에 한글 없음·300자 이하, `nosniff`/공개파일 변형(헤더 없음, 키 발견, 404 아님, 요청 하나 실패→`not_run`), 요청 쪽 검증(13회 전부 헤더, Authorization은 `forged_token_list`만, GET·`redirect: 'error'`)은 그대로. 변형 11가지(오타, `not_run` 접미어, 한글 토큰, 시각·요청ID·표식 복귀, 헤더 누락 등)에서 테스트가 실패함을 사본에서 확인. `npm run test:r5` → 10/10, `node --test "test/*.test.mjs"` → 97/97.
+    - 실측(배포 `bdc7e48` 대상, GET만): 11건 모두 영어 한 줄, 9건 `not_run`. 예: `GET /api/notes -> HTTP 401, JSON`, `GET /data.json -> HTTP 404, not JSON`, `GET /aleph.json -> HTTP 200, JSON`, `GET / -> HTTP 200, not JSON, X-Content-Type-Options: nosniff`.
+    - 보류한 후보 원인(이번에 안 고침): 저장소 `aleph.config.json`의 `publicAppUrl`(omega 별칭)과 배포된 `/aleph.json`의 `publicAppUrl`(배포별 주소)이 다릅니다. 심판이 `/aleph.json` 쪽 주소로 요청을 기다린다면 우리 요청은 다른 호스트로 나가 0건이 됩니다. 또 Node의 `fetch`는 `HTTP_PROXY` 환경변수를 무시하므로 심판이 프록시로 요청을 기록하는 구조라면 보이지 않을 수 있습니다. 둘 다 `scripts/deployment-identity.mjs` 등 다른 파일을 건드려야 해서, 심판의 "다른 파일은 건드리지 마세요"에 따라 다음 판정문이 같을 때 손댑니다.
+    - **정직하게 밝히는 한계**: 이것도 추측입니다. 다만 지난 15번은 모두 심판 문장에 없는 것을 더하는 수정이었고, 이번은 심판 문장에 있는 것만 남기는 첫 수정입니다. 재제출 결과로만 확인됩니다.
 
 **지금 상태:** `npm install`은 패키지 10개 추가, 취약점 0건으로 오류 없이 끝납니다(`aleph.config.json`의 `step`도 12로 반영됨). 심판의 "41종"과 이 저장소의 "58건"은 여전히 같은 숫자가 아닙니다 — 위 "57건과 심판의 '41종'은 같은 숫자가 아닙니다" 절 참고(현재는 58건).
 

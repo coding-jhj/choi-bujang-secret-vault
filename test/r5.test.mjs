@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { deploymentIdentity } from '../scripts/deployment-identity.mjs';
-import { runAttackChecks, CASE_BY_ATTACK_ID, NOT_RUN_WRITE_OR_SECRET, NOT_RUN_LIVE_FAILED, ATTACK_ID_HEADER } from '../src/attack-check.mjs';
+import { runAttackChecks, CASE_BY_ATTACK_ID, NOT_RUN_WRITE_OR_SECRET, NOT_RUN_LIVE_FAILED, ATTACK_ID_HEADER, ATTACK_ID_QUERY } from '../src/attack-check.mjs';
 import { CAMPAIGN_CASES } from '../src/campaign-cases.mjs';
 
 const config = {
@@ -60,6 +60,9 @@ const recordingFetch = (body, serverId) => {
 };
 // Case-insensitive header lookup that works for any init.headers shape (object, Headers, pairs).
 const headerOf = (call, name) => new Headers(call.init?.headers).get(name);
+// 16차: the attackId a recorded request carries in its URL query, and the URL string exactly as it was fetched.
+const queryIdOf = call => new URL(call.target).searchParams.get(ATTACK_ID_QUERY);
+const sentUrl = call => String(call.target);
 
 // 15차: observed is English tokens only (a status line, or the bare `not_run`) and stays inside the
 // 300-char cap scripts/bundle.mjs enforces. Every run below is passed through this.
@@ -99,6 +102,8 @@ test('쓰기 요청·비밀값이 필요한 점검(합성 공격 포함)은 fetc
     assert.equal(item.observed, 'not_run', attackId);
     // 14차: not just labelled not_run - no request may go out carrying this attackId's header.
     assert.ok(!calls.some(call => headerOf(call, 'x-attack-id') === attackId), `${attackId}: a request was sent`);
+    // 16차: nor may any request URL carry it in the attackId query.
+    assert.ok(!calls.some(call => queryIdOf(call) === attackId), `${attackId}: a request URL carries it`);
   }
   assertEnglishWithinCap(results);
 });
@@ -112,16 +117,18 @@ test('공개 GET 점검(no_login_list)은 이번 실행이 실제로 보낸 요�
   };
   const results = await runAttackChecks(config, { fetchImpl });
   const item = results.find(r => r.attackId === 'no_login_list');
-  // 15차: exactly the request path, the real status and the JSON flag. The x-vercel-id the stub sends
-  // is not echoed, and there is no prefix or verdict word.
-  assert.equal(item.observed, 'GET /api/notes -> HTTP 401, JSON');
+  // 15차: the real status and the JSON flag, no prefix or verdict word; the x-vercel-id the stub sends is
+  // not echoed. 16차: the request is stated by its full URL, attackId query included.
+  assert.equal(item.observed, 'GET https://student-defense.vercel.app/api/notes?attackId=no_login_list -> HTTP 401, JSON');
   assertEnglishWithinCap(results);
 });
 
-// 14차: the judge links each real request to its attackId by the X-Attack-Id request header, so the
-// header must be on EVERY fetch. 15차: it travels only as that request header - observed no longer names it.
-test('실제로 보내는 모든 GET 요청은 X-Attack-Id 헤더에 자기 attackId를 싣고, 관찰 문구에는 상태와 JSON 여부만 적는다', async () => {
-  assert.equal(ATTACK_ID_HEADER, 'X-Attack-Id'); // the wire name the judge looks for
+// 14차: the X-Attack-Id request header must be on EVERY fetch. 15차: it travels only as that request header,
+// observed no longer names it. 16차: the judge sandbox strips headers, so the same attackId is also in every
+// request URL's query, and observed states the full URL that was fetched.
+test('실제로 보내는 모든 GET 요청은 URL 쿼리와 X-Attack-Id 헤더에 자기 attackId를 싣고, 관찰 문구에는 보낸 전체 URL과 상태·JSON 여부만 적는다', async () => {
+  assert.equal(ATTACK_ID_HEADER, 'X-Attack-Id'); // the wire name of the (now secondary) header tag
+  assert.equal(ATTACK_ID_QUERY, 'attackId'); // the query name that survives the judge sandbox
   const liveIds = Object.keys(CASE_BY_ATTACK_ID).filter(id => !WRITE_OR_SECRET_IDS.includes(id));
   const serverId = 'icn1::header-test-id';
   const { calls, fetchImpl } = recordingFetch({ error: 'LOGIN_REQUIRED' }, serverId);
@@ -141,6 +148,15 @@ test('실제로 보내는 모든 GET 요청은 X-Attack-Id 헤더에 자기 atta
     assert.equal(sent.filter(value => value === id).length, id === 'public_files_no_key' ? 3 : 1, id);
   }
 
+  // 16차: the same id is in the URL. Every recorded URL has exactly one attackId query value, equal to its
+  // header and one of the 11 live ids.
+  for (const call of calls) {
+    assert.equal(new URL(call.target).searchParams.getAll(ATTACK_ID_QUERY).length, 1, sentUrl(call));
+    const inUrl = queryIdOf(call);
+    assert.equal(inUrl, headerOf(call, 'x-attack-id'), sentUrl(call));
+    assert.ok(liveIds.includes(inUrl), `${sentUrl(call)}: attackId in the URL is not a live id`);
+  }
+
   // Moving the old direct fetches behind the header must not drop what they already set, and the
   // forged Authorization must stay on forged_token_list only.
   for (const call of calls) {
@@ -152,17 +168,32 @@ test('실제로 보내는 모든 GET 요청은 X-Attack-Id 헤더에 자기 atta
     if (id === 'forged_token_list') assert.ok(authorization, 'forged_token_list lost its Authorization header');
     else assert.equal(authorization, null, `${id} must not carry Authorization`);
   }
-  // The one request that leaves the app origin (Supabase REST) is tagged too.
+  // The one request that leaves the app origin (Supabase REST) is tagged too, and the `select=id` query it
+  // already had stays: attackId is appended after it, not substituted for it.
   const rest = calls.find(call => headerOf(call, 'x-attack-id') === 'original_api_no_key_read');
-  assert.equal(new URL(rest.target).hostname, new URL(config.originalApiUrl).hostname);
+  const restUrl = new URL(rest.target);
+  assert.equal(restUrl.hostname, new URL(config.originalApiUrl).hostname);
+  assert.equal(restUrl.searchParams.get('select'), 'id');
+  assert.equal(restUrl.searchParams.get(ATTACK_ID_QUERY), 'original_api_no_key_read');
+  assert.equal(restUrl.search, '?select=id&attackId=original_api_no_key_read');
 
   // The header is request-side only: every live observed is a plain status line with none of the old
-  // noise (evidence prefix, X-Attack-Id tag, server request id, timestamp label).
+  // noise (evidence prefix, X-Attack-Id tag, server request id, timestamp label). 16차: it opens with the
+  // full https URL, and contains the exact URL string that was fetched for that attackId.
   for (const id of liveIds) {
     const item = results.find(r => r.attackId === id);
-    assert.match(item.observed, /^GET \S+ -> HTTP \d{3}, (JSON|not JSON)/, id);
+    assert.match(item.observed, /^GET https:\/\/\S+ -> HTTP \d{3}, (JSON|not JSON)/, id);
     for (const noise of ['증거', 'X-Attack-Id', '서버 요청ID', '확인 시각', serverId]) {
       assert.ok(!item.observed.includes(noise), `${id}: observed contains "${noise}": ${item.observed}`);
+    }
+    const urls = calls.filter(call => queryIdOf(call) === id).map(sentUrl);
+    assert.ok(urls.length >= 1, id);
+    for (const url of urls) {
+      // public_files_no_key writes the host once: its `/` request is listed as a full URL, the two old key
+      // files as the same URL minus the origin (path + query, so each still shows its own attackId).
+      const { origin, pathname } = new URL(url);
+      const listed = id === 'public_files_no_key' && pathname !== '/' ? url.slice(origin.length) : url;
+      assert.ok(item.observed.includes(listed), `${id}: observed lacks the fetched URL ${listed}: ${item.observed}`);
     }
   }
   assertEnglishWithinCap(results);
@@ -170,30 +201,33 @@ test('실제로 보내는 모든 GET 요청은 X-Attack-Id 헤더에 자기 atta
 
 // 15차: the exact observed text of all 11 live probes. The stub answers 401 JSON on every path, so the
 // table also pins "the real status, whatever it is": /data.json and /aleph.json are recorded as 401, not
-// forced to an expected 404/200, and no verdict word appears anywhere.
-test('실시간 GET 11건의 observed는 "GET <경로> -> HTTP <상태>, JSON|not JSON" 영어 토큰 형식 그대로다', async () => {
+// forced to an expected 404/200, and no verdict word appears anywhere. 16차: each line names the full URL
+// that was sent - host, path and the attackId query (appended after `select=id` for the Supabase read).
+test('실시간 GET 11건의 observed는 "GET <전체 URL> -> HTTP <상태>, JSON|not JSON" 영어 토큰 형식 그대로다', async () => {
   const { fetchImpl } = recordingFetch({ error: 'LOGIN_REQUIRED' }, 'icn1::format-test-id');
   const results = await runAttackChecks(config, { fetchImpl });
   const live = Object.fromEntries(results
     .filter(item => !WRITE_OR_SECRET_IDS.includes(item.attackId))
     .map(item => [item.attackId, item.observed]));
   assert.deepEqual(live, {
-    no_login_list: 'GET /api/notes -> HTTP 401, JSON',
-    forged_token_list: 'GET /api/notes -> HTTP 401, JSON',
-    no_login_item_read: 'GET /api/notes/00000000-0000-4000-8000-000000000000 -> HTTP 401, JSON',
-    no_login_announcements_list: 'GET /api/announcements -> HTTP 401, JSON',
-    no_login_device_status: 'GET /api/devices/status -> HTTP 401, JSON',
-    original_api_no_key_read: 'GET /rest/v1/notes?select=id -> HTTP 401, JSON',
-    public_data_json_read: 'GET /data.json -> HTTP 401, JSON',
-    aleph_json_open: 'GET /aleph.json -> HTTP 401, JSON',
-    no_login_ops_summary: 'GET /api/ops/summary -> HTTP 401, JSON',
-    nosniff_header: 'GET / -> HTTP 401, JSON, X-Content-Type-Options: none',
-    public_files_no_key: 'GET / -> HTTP 401, JSON, key string absent; GET /auth-config.json -> HTTP 401; GET /supabase.js -> HTTP 401',
+    no_login_list: 'GET https://student-defense.vercel.app/api/notes?attackId=no_login_list -> HTTP 401, JSON',
+    forged_token_list: 'GET https://student-defense.vercel.app/api/notes?attackId=forged_token_list -> HTTP 401, JSON',
+    no_login_item_read: 'GET https://student-defense.vercel.app/api/notes/00000000-0000-4000-8000-000000000000?attackId=no_login_item_read -> HTTP 401, JSON',
+    no_login_announcements_list: 'GET https://student-defense.vercel.app/api/announcements?attackId=no_login_announcements_list -> HTTP 401, JSON',
+    no_login_device_status: 'GET https://student-defense.vercel.app/api/devices/status?attackId=no_login_device_status -> HTTP 401, JSON',
+    original_api_no_key_read: 'GET https://abcdefgh.supabase.co/rest/v1/notes?select=id&attackId=original_api_no_key_read -> HTTP 401, JSON',
+    public_data_json_read: 'GET https://student-defense.vercel.app/data.json?attackId=public_data_json_read -> HTTP 401, JSON',
+    aleph_json_open: 'GET https://student-defense.vercel.app/aleph.json?attackId=aleph_json_open -> HTTP 401, JSON',
+    no_login_ops_summary: 'GET https://student-defense.vercel.app/api/ops/summary?attackId=no_login_ops_summary -> HTTP 401, JSON',
+    nosniff_header: 'GET https://student-defense.vercel.app/?attackId=nosniff_header -> HTTP 401, JSON, X-Content-Type-Options: none',
+    // The one entry that writes the host once: `/` in full, then the two old key files by path + query.
+    public_files_no_key: 'GET https://student-defense.vercel.app/?attackId=public_files_no_key -> HTTP 401, JSON, key string absent; /auth-config.json?attackId=public_files_no_key -> HTTP 401; /supabase.js?attackId=public_files_no_key -> HTTP 401',
   });
   assertEnglishWithinCap(results);
 });
 
-// 15차: the two probes whose line is not a plain `GET <path> -> HTTP <status>, JSON|not JSON`.
+// 15차: the two probes whose line is not a plain `GET <url> -> HTTP <status>, JSON|not JSON`. 16차: both
+// start from the full URL of their `/` request; public_files_no_key then lists its other two as path + query.
 test('nosniff_header와 public_files_no_key는 정해진 영어 토큰 형식으로만 적고, 세 요청 중 하나라도 실패하면 미실행이다', async () => {
   // Key-shaped, but assembled here so no key literal sits in the source of this public repo.
   const fakeKey = ['sb', 'publishable', 'A'.repeat(24)].join('_');
@@ -209,37 +243,75 @@ test('nosniff_header와 public_files_no_key는 정해진 영어 토큰 형식으
     assertEnglishWithinCap(results);
     return Object.fromEntries(results.map(item => [item.attackId, item.observed]));
   };
-  const homeLine = 'GET / -> HTTP 200, not JSON';
+  // The `/` request's line for one attackId: the full URL that was sent, then the status and the JSON flag.
+  const homeLine = id => `GET ${config.publicAppUrl}/?attackId=${id} -> HTTP 200, not JSON`;
+  const nosniffHome = homeLine('nosniff_header');
+  const filesHome = homeLine('public_files_no_key');
 
   const clean = await run({ '/': page });
-  assert.equal(clean.nosniff_header, `${homeLine}, X-Content-Type-Options: nosniff`);
+  assert.equal(clean.nosniff_header, `${nosniffHome}, X-Content-Type-Options: nosniff`);
   assert.equal(clean.public_files_no_key,
-    `${homeLine}, key string absent; GET /auth-config.json -> HTTP 404; GET /supabase.js -> HTTP 404`);
+    `${filesHome}, key string absent; /auth-config.json?attackId=public_files_no_key -> HTTP 404; /supabase.js?attackId=public_files_no_key -> HTTP 404`);
 
   // No X-Content-Type-Options header at all -> the word `none`.
   const bare = await run({ '/': { ...page, headers: { 'content-type': 'text/html' } } });
-  assert.equal(bare.nosniff_header, `${homeLine}, X-Content-Type-Options: none`);
+  assert.equal(bare.nosniff_header, `${nosniffHome}, X-Content-Type-Options: none`);
 
   // A key-shaped string on the first screen flips the flag to `present`; the string itself is never copied.
   const leaky = await run({ '/': { ...page, body: `<script>window.k='${fakeKey}'</script>` } });
   assert.equal(leaky.public_files_no_key,
-    `${homeLine}, key string present; GET /auth-config.json -> HTTP 404; GET /supabase.js -> HTTP 404`);
+    `${filesHome}, key string present; /auth-config.json?attackId=public_files_no_key -> HTTP 404; /supabase.js?attackId=public_files_no_key -> HTTP 404`);
   for (const text of Object.values(leaky)) assert.ok(!text.includes(fakeKey), text);
 
   // The real status, whatever it is: an old key file that answers 200 is listed as 200, with no verdict.
   const open = await run({ '/': page, '/supabase.js': { status: 200, body: 'x' } });
   assert.equal(open.public_files_no_key,
-    `${homeLine}, key string absent; GET /auth-config.json -> HTTP 404; GET /supabase.js -> HTTP 200`);
+    `${filesHome}, key string absent; /auth-config.json?attackId=public_files_no_key -> HTTP 404; /supabase.js?attackId=public_files_no_key -> HTTP 200`);
 
   // If any of the three fetches throws, the whole public_files_no_key entry is not_run - never a partial line.
   for (const path of ['/auth-config.json', '/supabase.js']) {
     const broken = await run({ '/': page, [path]: { throws: true } });
     assert.equal(broken.public_files_no_key, 'not_run', path);
-    assert.equal(broken.nosniff_header, `${homeLine}, X-Content-Type-Options: nosniff`, path); // unaffected
+    assert.equal(broken.nosniff_header, `${nosniffHome}, X-Content-Type-Options: nosniff`, path); // unaffected
   }
   const noHome = await run({ '/': { throws: true } });
   assert.equal(noHome.public_files_no_key, 'not_run');
   assert.equal(noHome.nosniff_header, 'not_run');
+});
+
+// 16차: originalApi() still rejects an originalApiUrl that already carries a query, because the attackId
+// query is only added later, inside liveFetch(). That entry stays not_run and sends nothing; the other ten
+// live probes are unaffected.
+test('originalApiUrl에 이미 쿼리가 있으면 original_api_no_key_read는 요청 없이 미실행이다', async () => {
+  const { calls, fetchImpl } = recordingFetch({ error: 'LOGIN_REQUIRED' }, 'icn1::base-query-test-id');
+  const results = await runAttackChecks({ ...config, originalApiUrl: `${config.originalApiUrl}?select=*` }, { fetchImpl });
+  assert.equal(results.find(r => r.attackId === 'original_api_no_key_read').observed, NOT_RUN_LIVE_FAILED);
+  assert.ok(!calls.some(call => queryIdOf(call) === 'original_api_no_key_read'), 'a request was sent for it');
+  assert.equal(calls.length, 12); // the 13 requests of a normal run, minus the one that is never sent
+  assertEnglishWithinCap(results);
+});
+
+// 16차: on a host as long as the deployed one (or longer), three full URLs would pass the 300-char cap
+// scripts/bundle.mjs enforces, so public_files_no_key writes the host once; every other entry stays one full URL.
+test('긴 호스트에서도 public_files_no_key의 observed는 300자 이내이고 호스트는 한 번만 적는다', async () => {
+  const longApp = 'https://a-very-long-project-name-for-the-length-check.vercel.app';
+  const { calls, fetchImpl } = recordingFetch({ error: 'LOGIN_REQUIRED' }, 'icn1::long-host-test-id');
+  const results = await runAttackChecks({ ...config, publicAppUrl: longApp }, { fetchImpl });
+  const item = results.find(r => r.attackId === 'public_files_no_key');
+  const urls = calls.filter(call => queryIdOf(call) === 'public_files_no_key').map(sentUrl);
+  assert.equal(urls.length, 3);
+  // Spelled out in full, the three requests alone would not fit...
+  assert.ok(urls.map(url => `GET ${url} -> HTTP 401`).join('; ').length > 300, 'this host is too short to need the short form');
+  // ...so only the `/` request is a full URL, the other two are path + query, and the observed stays inside the cap.
+  assert.equal(item.observed,
+    `GET ${longApp}/?attackId=public_files_no_key -> HTTP 401, JSON, key string absent; /auth-config.json?attackId=public_files_no_key -> HTTP 401; /supabase.js?attackId=public_files_no_key -> HTTP 401`);
+  assert.ok(item.observed.length <= 300, `${item.observed.length} chars`);
+  // Every other live entry still names the complete URL that was fetched for it.
+  for (const other of results.filter(r => !WRITE_OR_SECRET_IDS.includes(r.attackId) && r.attackId !== 'public_files_no_key')) {
+    const [url] = calls.filter(call => queryIdOf(call) === other.attackId).map(sentUrl);
+    assert.ok(other.observed.includes(url), `${other.attackId}: ${other.observed}`);
+  }
+  assertEnglishWithinCap(results);
 });
 
 // split_votes 핵심 회귀 테스트: 심판이 정확히 이 대체 경로(이전의 describeCase(caseResult))를

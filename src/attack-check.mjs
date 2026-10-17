@@ -24,6 +24,7 @@
 //    own real HTTP status) or counts as not_run - never a stand-in from committed evidence.
 // 5) (14차, 2026-10-17) Judge couldn't link requests to attackIds: live GETs send X-Attack-Id (observed named it too, until 6).
 // 6) (15차, 2026-10-17) observed reduced to English tokens: status + JSON flag only; not_run is the bare token.
+// 7) (16차, 2026-10-17) attackId moved into the URL query (sandbox strips headers); observed states the full URL sent.
 // Checks that need a write request, a secret, or a logged-in test account (step 12's composite
 // cases) still cannot be sent from here without violating constraints this file must honor (no
 // write traffic, no secret) - those are always not_run too. The committed, request-id-backed
@@ -107,38 +108,58 @@ export const NOT_RUN_WRITE_OR_SECRET = 'not_run';
 // 대신 채우지 않는다. 심판이 바로 이 대체 경로(이전의 describeCase(caseResult))를 지목했다.
 export const NOT_RUN_LIVE_FAILED = 'not_run';
 
-// The judge links each real request to its attackId by this request header; response-side fields
-// alone (status, server request ID) were rejected, so every live fetch below must carry it.
+// 14차: every live fetch carries its attackId in this request header. 16차: the judge sandbox strips
+// request headers, so the header is only a secondary tag now; ATTACK_ID_QUERY is what can be matched.
 export const ATTACK_ID_HEADER = 'X-Attack-Id';
+
+// The judge sandbox rebuilt request headers and dropped User-Agent, so a header cannot be relied on.
+// The URL survives any recorder, and the judge compares requests by address, so every live GET also
+// carries `?attackId=<attackId>` (appended after any query the target already has).
+export const ATTACK_ID_QUERY = 'attackId';
 
 // ---- live probing: GET-only, unauthenticated, no secret - safe to run in any sandbox ----
 const FAKE_ID = '00000000-0000-4000-8000-000000000000';
 const KEY_PATTERN = /sb_(?:publishable|secret)_[A-Za-z0-9_-]{8,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{8,}/u;
 const forgedToken = 'Bearer aaaaaaaaaaaa.bbbbbbbbbbbb.cccccccccccc';
 
-// The only place a live request is sent, so every one carries `X-Attack-Id: <attackId>`. The header is
-// spread last: nothing in `init` (e.g. the forged Authorization below) can drop or override it.
-function liveFetch(fetchImpl, attackId, target, init = {}) {
-  return fetchImpl(target, {
+// The only place a live request is sent, so every one carries `?attackId=<attackId>` in its URL and
+// `X-Attack-Id: <attackId>` as a header. The query is added here, after originalApi() has validated the
+// base URL (that check rejects a base with a query), and it is appended to any query the target already
+// has (`?select=id` becomes `?select=id&attackId=...`). The header is spread last: nothing in `init`
+// (e.g. the forged Authorization below) can drop or override it. Returns the response and `href`, the
+// exact URL string that was fetched, so observed can state the address that really went out.
+async function liveFetch(fetchImpl, attackId, target, init = {}) {
+  const url = new URL(target);
+  url.searchParams.set(ATTACK_ID_QUERY, attackId);
+  const href = url.href;
+  const response = await fetchImpl(href, {
     redirect: 'error', signal: AbortSignal.timeout(10000), ...init,
     headers: { ...init.headers, [ATTACK_ID_HEADER]: attackId },
   });
+  return { response, href };
 }
 
-// One GET through liveFetch(). `json` is whether the body parsed as JSON; that is read from a clone,
-// so `response` itself is still unread for callers that need its headers or body.
+// One GET through liveFetch(). `url` is the final URL string that was actually sent, attackId query
+// included. `json` is whether the body parsed as JSON; that is read from a clone, so `response` itself
+// is still unread for callers that need its headers or body.
 async function probe(fetchImpl, attackId, target, init) {
-  const response = await liveFetch(fetchImpl, attackId, target, init);
+  const { response, href } = await liveFetch(fetchImpl, attackId, target, init);
   let json = false;
   try { await response.clone().json(); json = true; } catch { /* not JSON */ }
-  return { response, status: response.status, json, path: `${target.pathname}${target.search}` };
+  return { response, status: response.status, json, url: href };
 }
 
-// observed text is English tokens only: `GET <path> -> HTTP <status>` is the request address this run
-// sent plus the real status, whatever it is; jsonLine() adds whether the body parsed as JSON. No verdict
-// words, no server request id, no time, no header echo (that is the 15차 reduction, see History 6).
-const statusLine = r => `GET ${r.path} -> HTTP ${r.status}`;
+// observed text is English tokens only: `GET <full url> -> HTTP <status>` is the complete request address
+// this run sent (scheme, host, path and the attackId query, see History 7) plus the real status, whatever
+// it is; jsonLine() adds whether the body parsed as JSON. No verdict words, no server request id, no time,
+// no header echo (that is the 15차 reduction, see History 6). pathLine() is the short form
+// public_files_no_key uses for its follow-up requests: path, query and status, the host is written once.
+const statusLine = r => `GET ${r.url} -> HTTP ${r.status}`;
 const jsonLine = r => `${statusLine(r)}, ${r.json ? 'JSON' : 'not JSON'}`;
+const pathLine = r => {
+  const sent = new URL(r.url);
+  return `${sent.pathname}${sent.search} -> HTTP ${r.status}`;
+};
 
 function originalApi(config) {
   const base = new URL(config.originalApiUrl);
@@ -151,9 +172,9 @@ function originalApi(config) {
 
 // attackId -> async (app, config, fetchImpl, attackId) -> the observed text (see jsonLine). Only plain GET,
 // unauthenticated checks live here; each reports the real request THIS run sent, which carried its
-// `X-Attack-Id` request header. Anything needing a write request, a secret, or a logged-in test account
-// is deliberately absent and stays not_run (as does a probe whose own request fails); no fallback to
-// committed evidence.
+// attackId in the URL query (and in the `X-Attack-Id` header). Anything needing a write request, a secret,
+// or a logged-in test account is deliberately absent and stays not_run (as does a probe whose own request
+// fails); no fallback to committed evidence.
 const LIVE_PROBES = {
   async no_login_list(app, config, fetchImpl, attackId) {
     return jsonLine(await probe(fetchImpl, attackId, new URL('/api/notes', app)));
@@ -173,6 +194,7 @@ const LIVE_PROBES = {
   async no_login_ops_summary(app, config, fetchImpl, attackId) {
     return jsonLine(await probe(fetchImpl, attackId, new URL('/api/ops/summary', app)));
   },
+  // originalApi() validates the base first (it must have no query); liveFetch() appends attackId after `select=id`.
   async original_api_no_key_read(app, config, fetchImpl, attackId) {
     return jsonLine(await probe(fetchImpl, attackId, new URL('?select=id', originalApi(config))));
   },
@@ -188,13 +210,17 @@ const LIVE_PROBES = {
   },
   // All three requests (/, /auth-config.json, /supabase.js) are always sent and always listed. If any of
   // them throws, the whole probe rejects and runAttackChecks() records not_run - never a partial line.
+  // This is the one entry that writes the host once: `/` is listed with its full URL, the two old key files
+  // by path, query and status (each still shows its own `?attackId=`). Three full URLs on the deployed host
+  // come to about 345 chars, past the 300 that scripts/bundle.mjs enforces; this form is about 239. Every
+  // other entry is a single full URL.
   async public_files_no_key(app, config, fetchImpl, attackId) {
     const home = await probe(fetchImpl, attackId, new URL('/', app));
     const html = await home.response.text();
     const old = await Promise.all(['/auth-config.json', '/supabase.js']
       .map(path => probe(fetchImpl, attackId, new URL(path, app))));
     const key = KEY_PATTERN.test(html) ? 'present' : 'absent';
-    return [`${jsonLine(home)}, key string ${key}`, ...old.map(statusLine)].join('; ');
+    return [`${jsonLine(home)}, key string ${key}`, ...old.map(pathLine)].join('; ');
   },
 };
 
@@ -223,7 +249,8 @@ export async function runAttackChecks(config, { fetchImpl = fetch } = {}) {
         observed = NOT_RUN_LIVE_FAILED; // no publicAppUrl to probe - never report a committed stand-in
       } else {
         try {
-          // scripts/bundle.mjs rejects an observed longer than 300 chars; only a raw header value could ever get near that.
+          // scripts/bundle.mjs rejects an observed longer than 300 chars. A full URL on a long host can get near that,
+          // which is why public_files_no_key writes the host once for its follow-ups (this slice is only a backstop).
           observed = (await live(app, config, fetchImpl, attackId)).slice(0, 300);
         } catch {
           observed = NOT_RUN_LIVE_FAILED; // this run's own request failed - not_run, never a committed stand-in

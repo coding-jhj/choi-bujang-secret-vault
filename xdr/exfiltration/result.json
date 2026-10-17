@@ -1,0 +1,191 @@
+{
+  "schema": "aleph.xdr.result.v1",
+  "moduleKey": "exfiltration",
+  "decisions": [
+    {
+      "alertId": "ex-01",
+      "action": "block",
+      "confidence": 0.94,
+      "reason": "rule.level 12(10 이상)의 외부 전송으로 T1041/T1048 자료 유출 패턴이 뚜렷함"
+    },
+    {
+      "alertId": "ex-02",
+      "action": "block",
+      "confidence": 0.94,
+      "reason": "rule.level 12(10 이상)의 외부 전송으로 T1041/T1048 자료 유출 패턴이 뚜렷함"
+    },
+    {
+      "alertId": "ex-03",
+      "action": "block",
+      "confidence": 0.9199999999999999,
+      "reason": "rule.level 11(10 이상)의 외부 전송으로 T1041/T1048 자료 유출 패턴이 뚜렷함"
+    },
+    {
+      "alertId": "ex-04",
+      "action": "block",
+      "confidence": 0.94,
+      "reason": "rule.level 12(10 이상)의 외부 전송으로 T1041/T1048 자료 유출 패턴이 뚜렷함"
+    },
+    {
+      "alertId": "ex-05",
+      "action": "block",
+      "confidence": 0.8999999999999999,
+      "reason": "rule.level 10(10 이상)의 외부 전송으로 T1041/T1048 자료 유출 패턴이 뚜렷함"
+    },
+    {
+      "alertId": "ex-06",
+      "action": "block",
+      "confidence": 0.94,
+      "reason": "rule.level 12(10 이상)의 외부 전송으로 T1041/T1048 자료 유출 패턴이 뚜렷함"
+    },
+    {
+      "alertId": "ex-07",
+      "action": "block",
+      "confidence": 0.9199999999999999,
+      "reason": "rule.level 11(10 이상)의 외부 전송으로 T1041/T1048 자료 유출 패턴이 뚜렷함"
+    },
+    {
+      "alertId": "ex-08",
+      "action": "block",
+      "confidence": 0.94,
+      "reason": "rule.level 12(10 이상)의 외부 전송으로 T1041/T1048 자료 유출 패턴이 뚜렷함"
+    },
+    {
+      "alertId": "ex-09",
+      "action": "block",
+      "confidence": 0.8999999999999999,
+      "reason": "rule.level 10(10 이상)의 외부 전송으로 T1041/T1048 자료 유출 패턴이 뚜렷함"
+    },
+    {
+      "alertId": "ex-10",
+      "action": "block",
+      "confidence": 0.94,
+      "reason": "rule.level 12(10 이상)의 외부 전송으로 T1041/T1048 자료 유출 패턴이 뚜렷함"
+    },
+    {
+      "alertId": "ex-11",
+      "action": "alert",
+      "confidence": 0.53,
+      "reason": "rule.level 6의 외부 전송으로 T1041/T1048 의심 신호는 있으나 확정하기엔 애매함"
+    },
+    {
+      "alertId": "ex-12",
+      "action": "alert",
+      "confidence": 0.56,
+      "reason": "rule.level 7의 외부 전송으로 T1041/T1048 의심 신호는 있으나 확정하기엔 애매함"
+    },
+    {
+      "alertId": "ex-13",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "rule.level 5의 외부 전송으로 T1041/T1048 의심 신호는 있으나 확정하기엔 애매함"
+    },
+    {
+      "alertId": "ex-14",
+      "action": "alert",
+      "confidence": 0.53,
+      "reason": "rule.level 6의 외부 전송으로 T1041/T1048 의심 신호는 있으나 확정하기엔 애매함"
+    },
+    {
+      "alertId": "ex-15",
+      "action": "alert",
+      "confidence": 0.59,
+      "reason": "rule.level 8의 외부 전송으로 T1041/T1048 의심 신호는 있으나 확정하기엔 애매함"
+    },
+    {
+      "alertId": "ex-16",
+      "action": "alert",
+      "confidence": 0.53,
+      "reason": "rule.level 6의 외부 전송으로 T1041/T1048 의심 신호는 있으나 확정하기엔 애매함"
+    },
+    {
+      "alertId": "ex-17",
+      "action": "alert",
+      "confidence": 0.56,
+      "reason": "rule.level 7의 외부 전송으로 T1041/T1048 의심 신호는 있으나 확정하기엔 애매함"
+    },
+    {
+      "alertId": "ex-18",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "rule.level 5의 외부 전송으로 T1041/T1048 의심 신호는 있으나 확정하기엔 애매함"
+    },
+    {
+      "alertId": "ex-19",
+      "action": "alert",
+      "confidence": 0.53,
+      "reason": "rule.level 6의 외부 전송으로 T1041/T1048 의심 신호는 있으나 확정하기엔 애매함"
+    },
+    {
+      "alertId": "ex-20",
+      "action": "alert",
+      "confidence": 0.56,
+      "reason": "rule.level 7의 외부 전송으로 T1041/T1048 의심 신호는 있으나 확정하기엔 애매함"
+    },
+    {
+      "alertId": "ex-21",
+      "action": "record",
+      "confidence": 0.05,
+      "reason": "T1041/T1048 신호 없음(정상 조회/동기화/세션 활동)"
+    },
+    {
+      "alertId": "ex-22",
+      "action": "record",
+      "confidence": 0.05,
+      "reason": "T1041/T1048 신호 없음(정상 조회/동기화/세션 활동)"
+    },
+    {
+      "alertId": "ex-23",
+      "action": "record",
+      "confidence": 0.1,
+      "reason": "rule.level이 낮아 공격 신호로 보기 어려움"
+    },
+    {
+      "alertId": "ex-24",
+      "action": "record",
+      "confidence": 0.05,
+      "reason": "T1041/T1048 신호 없음(정상 조회/동기화/세션 활동)"
+    },
+    {
+      "alertId": "ex-25",
+      "action": "record",
+      "confidence": 0.05,
+      "reason": "T1041/T1048 신호 없음(정상 조회/동기화/세션 활동)"
+    },
+    {
+      "alertId": "ex-26",
+      "action": "record",
+      "confidence": 0.05,
+      "reason": "T1041/T1048 신호 없음(정상 조회/동기화/세션 활동)"
+    },
+    {
+      "alertId": "ex-27",
+      "action": "record",
+      "confidence": 0.05,
+      "reason": "T1041/T1048 신호 없음(정상 조회/동기화/세션 활동)"
+    },
+    {
+      "alertId": "ex-28",
+      "action": "record",
+      "confidence": 0.05,
+      "reason": "T1041/T1048 신호 없음(정상 조회/동기화/세션 활동)"
+    },
+    {
+      "alertId": "ex-29",
+      "action": "record",
+      "confidence": 0.05,
+      "reason": "T1041/T1048 신호 없음(정상 조회/동기화/세션 활동)"
+    },
+    {
+      "alertId": "ex-30",
+      "action": "record",
+      "confidence": 0.05,
+      "reason": "T1041/T1048 신호 없음(정상 조회/동기화/세션 활동)"
+    }
+  ],
+  "counts": {
+    "block": 10,
+    "alert": 10,
+    "record": 10
+  }
+}

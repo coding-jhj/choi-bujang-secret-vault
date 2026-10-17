@@ -48,9 +48,9 @@ Verify against code before citing. Doc drift found so far:
 
 | Command | Reality |
 |---|---|
-| `npm run decider:test` | Practice only. Throws until RULE_IDS has `device_registered`. |
-| `npm run detect:test` | Practice only (step 9). Starter fails 2 of 6 cases. |
-| `npm run build -- --local` | Writes `public/` only. Plain `npm run build` needs VERCEL_* env. |
+| `npm run decider:test` | Practice only. Passes (4 cases) as of 2026-10-17. |
+| `npm run detect:test` | Practice only (step 9). Passes (6 cases) as of 2026-10-17. |
+| `npm run build -- --local` | Creates the `public/` dir only and writes no files (`public/aleph.json` is written only in the Vercel build). Plain `npm run build` needs VERCEL_* env. |
 | `npm run bundle` | Needs a clean git tree, a HEAD commit with changes, and `bundle-notes.json`. Sends LIVE requests to the deployed site and the Supabase REST URL. |
 | `npm run xdr:run -- <key>` | Overwrites tracked `xdr/<key>/result.json`. |
 | `npm run test:auth` / `test:notes` / `test:r5` / `test:package` | `node --test`. |

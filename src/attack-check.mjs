@@ -21,8 +21,9 @@
 //    failed request in THIS run must never be backfilled with a committed result from some other
 //    run, no matter how genuine that other run's evidence was. Root fix: this file no longer
 //    reads or replays ops/campaign-retest-results.json at all. A live probe either succeeds (its
-//    own real server id/status) or counts as not_run - never a stand-in from committed evidence.
-// 5) (14차, 2026-10-17) Judge couldn't link requests to attackIds: live GETs send X-Attack-Id, observed names it.
+//    own real HTTP status) or counts as not_run - never a stand-in from committed evidence.
+// 5) (14차, 2026-10-17) Judge couldn't link requests to attackIds: live GETs send X-Attack-Id (observed named it too, until 6).
+// 6) (15차, 2026-10-17) observed reduced to English tokens: status + JSON flag only; not_run is the bare token.
 // Checks that need a write request, a secret, or a logged-in test account (step 12's composite
 // cases) still cannot be sent from here without violating constraints this file must honor (no
 // write traffic, no secret) - those are always not_run too. The committed, request-id-backed
@@ -92,17 +93,14 @@ const WRITE_OR_SECRET_ATTACK_IDS = new Set([
 // 11차 재발 대응 (split_votes, 2026-10-16): the judge's correction text switched from Korean
 // prose ("미실행으로 남기세요") to the literal code-shaped `observed: "not_run"` - the same
 // lowercase token src/campaign-cases.mjs already uses as a state name (CASE_RESULTS, line 24).
-// Value starts with exactly that literal token.
 //
-// 13차 (2026-10-16): combined_no_login_and_cross_owner_read (1첩반상/S12-01) needs a second
-// logged-in test account, which this file can never hold - so it can only ever say not_run here,
-// which is honest but is not proof of defense. scripts/campaign-retest.mjs just re-ran this exact
-// composite attack against the live deployment and it still passes (real serverRequestId,
-// committed to ops/campaign-retest-results.json, shown on /ops.html). Pointing to WHERE that real,
-// already-committed evidence lives is not the same thing the judge told us to stop doing
-// (replaying a stored result AS IF this run sent it) - the value still starts with the literal
-// not_run token and never claims a status/id this run produced.
-export const NOT_RUN_WRITE_OR_SECRET = 'not_run (실제 방어 증거는 ops/campaign-retest-results.json과 /ops.html에서 확인 가능 — 이번 실행이 보낸 요청은 아님)';
+// 15차 (2026-10-17): the value is exactly that bare token. 13차 had appended a Korean sentence
+// pointing at ops/campaign-retest-results.json and /ops.html; it is gone, because the judge asked
+// three rounds running for only the real status + JSON flag of requests actually sent and
+// `not_run` for the rest. combined_no_login_and_cross_owner_read (1첩반상/S12-01) needs a second
+// logged-in test account this file can never hold, so it can only say not_run here; the committed
+// evidence for it stays in ops/campaign-retest-results.json and /ops.html, never in this value.
+export const NOT_RUN_WRITE_OR_SECRET = 'not_run';
 
 // 10차 재발 대응 (split_votes): 나머지 11개 GET 전용 점검도 이번 실행이 실제로 보내는 요청이
 // 실패하면(네트워크 오류, 심판 샌드박스 제약 등) not_run으로만 적는다 — 커밋된 과거 증거로
@@ -113,36 +111,10 @@ export const NOT_RUN_LIVE_FAILED = 'not_run';
 // alone (status, server request ID) were rejected, so every live fetch below must carry it.
 export const ATTACK_ID_HEADER = 'X-Attack-Id';
 
-// The judge's own submission validator caps each observed string at 300 chars; serverRequestId
-// and checkedAt are the actual evidence, so when the descriptive text is long, clip only that text
-// (never the id/time) so the real evidence always survives intact.
-function clip(label, text, idBit, atBit) {
-  const max = 300 - label.length - 2 /* '(' ')' */ - idBit.length - atBit.length;
-  const body = text.length > max ? `${text.slice(0, Math.max(0, max - 1))}…` : text;
-  return `${label}(${body}${idBit}${atBit})`;
-}
-
-// 12차 재발 대응 (split_votes): 심판이 처음으로 no_login_list·forged_token_list·
-// no_login_item_read를 구체적으로 지목하며 "각 ID의 요청 주소와 실제 보낸 GET을 대조해
-// HTTP 상태와 JSON 응답 여부를 기록하세요"라고 했다. 지금까지 이 글은 성공했을 때
-// (`ok: true`) detail을 그냥 `HTTP ${status}`로만 적어, 실제로 보낸 요청 주소(path)와
-// JSON 여부를 명시하지 않고 있었다 — 실패했을 때만 그 둘을 적었다. 이제 성공·실패 모두
-// 같은 형태(`GET <path> -> HTTP <status>, JSON <예|아니오>`)로 적는다.
-function evidenceText(ok, detail, serverRequestId, checkedAt) {
-  const idBit = serverRequestId ? `, 서버 요청ID ${serverRequestId}` : '';
-  const atBit = checkedAt ? `, 확인 시각 ${checkedAt}` : '';
-  return clip(ok ? '증거 확인됨 ' : '증거 확인됨, 그러나 기대와 다름 ', detail, idBit, atBit);
-}
-
 // ---- live probing: GET-only, unauthenticated, no secret - safe to run in any sandbox ----
 const FAKE_ID = '00000000-0000-4000-8000-000000000000';
-const closedStatus = status => status === 401 || status === 403;
-const readServerRequestId = headers => headers.get('x-vercel-id') ?? headers.get('sb-request-id') ?? null;
 const KEY_PATTERN = /sb_(?:publishable|secret)_[A-Za-z0-9_-]{8,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{8,}/u;
 const forgedToken = 'Bearer aaaaaaaaaaaa.bbbbbbbbbbbb.cccccccccccc';
-
-// `[X-Attack-Id=<attackId>]`: the same value liveFetch() sends as a header, repeated in each observed text.
-const attackIdTag = attackId => `[${ATTACK_ID_HEADER}=${attackId}]`;
 
 // The only place a live request is sent, so every one carries `X-Attack-Id: <attackId>`. The header is
 // spread last: nothing in `init` (e.g. the forged Authorization below) can drop or override it.
@@ -153,18 +125,20 @@ function liveFetch(fetchImpl, attackId, target, init = {}) {
   });
 }
 
+// One GET through liveFetch(). `json` is whether the body parsed as JSON; that is read from a clone,
+// so `response` itself is still unread for callers that need its headers or body.
 async function probe(fetchImpl, attackId, target, init) {
   const response = await liveFetch(fetchImpl, attackId, target, init);
   let json = false;
   try { await response.clone().json(); json = true; } catch { /* not JSON */ }
-  const path = `${target.pathname}${target.search}`;
-  return { status: response.status, json, serverRequestId: readServerRequestId(response.headers), path, attackId };
+  return { response, status: response.status, json, path: `${target.pathname}${target.search}` };
 }
 
-// `GET <path> [X-Attack-Id=<attackId>] -> HTTP <status>, JSON <예|아니오>` - the exact request address,
-// the attackId header it carried, status, and JSON-ness the judge asked for, in one uniform shape for
-// every closed-status probe below.
-const closedDetail = r => `GET ${r.path} ${attackIdTag(r.attackId)} -> HTTP ${r.status}, JSON ${r.json ? '예' : '아니오'}`;
+// observed text is English tokens only: `GET <path> -> HTTP <status>` is the request address this run
+// sent plus the real status, whatever it is; jsonLine() adds whether the body parsed as JSON. No verdict
+// words, no server request id, no time, no header echo (that is the 15차 reduction, see History 6).
+const statusLine = r => `GET ${r.path} -> HTTP ${r.status}`;
+const jsonLine = r => `${statusLine(r)}, ${r.json ? 'JSON' : 'not JSON'}`;
 
 function originalApi(config) {
   const base = new URL(config.originalApiUrl);
@@ -175,68 +149,52 @@ function originalApi(config) {
   return base;
 }
 
-// attackId -> async (app, config, fetchImpl, attackId) -> { ok, detail, serverRequestId }. Only plain GET,
-// unauthenticated checks live here; each reports the real request THIS run sent, tagged `X-Attack-Id`.
-// Anything needing a write request, a secret, or a logged-in test account is deliberately absent and
-// stays not_run (as does a probe whose own request fails); no fallback to committed evidence.
+// attackId -> async (app, config, fetchImpl, attackId) -> the observed text (see jsonLine). Only plain GET,
+// unauthenticated checks live here; each reports the real request THIS run sent, which carried its
+// `X-Attack-Id` request header. Anything needing a write request, a secret, or a logged-in test account
+// is deliberately absent and stays not_run (as does a probe whose own request fails); no fallback to
+// committed evidence.
 const LIVE_PROBES = {
   async no_login_list(app, config, fetchImpl, attackId) {
-    const r = await probe(fetchImpl, attackId, new URL('/api/notes', app));
-    return { ok: closedStatus(r.status) && r.json, detail: closedDetail(r), serverRequestId: r.serverRequestId };
+    return jsonLine(await probe(fetchImpl, attackId, new URL('/api/notes', app)));
   },
   async forged_token_list(app, config, fetchImpl, attackId) {
-    const r = await probe(fetchImpl, attackId, new URL('/api/notes', app), { headers: { Authorization: forgedToken } });
-    return { ok: closedStatus(r.status) && r.json, detail: closedDetail(r), serverRequestId: r.serverRequestId };
+    return jsonLine(await probe(fetchImpl, attackId, new URL('/api/notes', app), { headers: { Authorization: forgedToken } }));
   },
   async no_login_item_read(app, config, fetchImpl, attackId) {
-    const r = await probe(fetchImpl, attackId, new URL(`/api/notes/${FAKE_ID}`, app));
-    return { ok: closedStatus(r.status) && r.json, detail: closedDetail(r), serverRequestId: r.serverRequestId };
+    return jsonLine(await probe(fetchImpl, attackId, new URL(`/api/notes/${FAKE_ID}`, app)));
   },
   async no_login_announcements_list(app, config, fetchImpl, attackId) {
-    const r = await probe(fetchImpl, attackId, new URL('/api/announcements', app));
-    return { ok: closedStatus(r.status) && r.json, detail: closedDetail(r), serverRequestId: r.serverRequestId };
+    return jsonLine(await probe(fetchImpl, attackId, new URL('/api/announcements', app)));
   },
   async no_login_device_status(app, config, fetchImpl, attackId) {
-    const r = await probe(fetchImpl, attackId, new URL('/api/devices/status', app));
-    return { ok: closedStatus(r.status) && r.json, detail: closedDetail(r), serverRequestId: r.serverRequestId };
+    return jsonLine(await probe(fetchImpl, attackId, new URL('/api/devices/status', app)));
   },
   async no_login_ops_summary(app, config, fetchImpl, attackId) {
-    const r = await probe(fetchImpl, attackId, new URL('/api/ops/summary', app));
-    return { ok: closedStatus(r.status) && r.json, detail: closedDetail(r), serverRequestId: r.serverRequestId };
+    return jsonLine(await probe(fetchImpl, attackId, new URL('/api/ops/summary', app)));
   },
   async original_api_no_key_read(app, config, fetchImpl, attackId) {
-    const r = await probe(fetchImpl, attackId, new URL('?select=id', originalApi(config)));
-    return { ok: closedStatus(r.status) && r.json, detail: closedDetail(r), serverRequestId: r.serverRequestId };
+    return jsonLine(await probe(fetchImpl, attackId, new URL('?select=id', originalApi(config))));
   },
   async public_data_json_read(app, config, fetchImpl, attackId) {
-    const r = await probe(fetchImpl, attackId, new URL('/data.json', app));
-    return { ok: r.status === 404, detail: closedDetail(r), serverRequestId: r.serverRequestId };
+    return jsonLine(await probe(fetchImpl, attackId, new URL('/data.json', app)));
   },
   async aleph_json_open(app, config, fetchImpl, attackId) {
-    const r = await probe(fetchImpl, attackId, new URL('/aleph.json', app));
-    return { ok: r.status === 200, detail: closedDetail(r), serverRequestId: r.serverRequestId };
+    return jsonLine(await probe(fetchImpl, attackId, new URL('/aleph.json', app)));
   },
   async nosniff_header(app, config, fetchImpl, attackId) {
-    const target = new URL('/', app);
-    const response = await liveFetch(fetchImpl, attackId, target);
-    const header = response.headers.get('x-content-type-options')?.toLowerCase();
-    const ok = header === 'nosniff';
-    return { ok, detail: `GET ${target.pathname} ${attackIdTag(attackId)} -> X-Content-Type-Options ${header ?? '없음'}`,
-      serverRequestId: readServerRequestId(response.headers) };
+    const r = await probe(fetchImpl, attackId, new URL('/', app));
+    return `${jsonLine(r)}, X-Content-Type-Options: ${r.response.headers.get('x-content-type-options') ?? 'none'}`;
   },
+  // All three requests (/, /auth-config.json, /supabase.js) are always sent and always listed. If any of
+  // them throws, the whole probe rejects and runAttackChecks() records not_run - never a partial line.
   async public_files_no_key(app, config, fetchImpl, attackId) {
-    const target = new URL('/', app);
-    const tag = attackIdTag(attackId); // all three requests below (/, /auth-config.json, /supabase.js) carry it
-    const home = await liveFetch(fetchImpl, attackId, target);
-    const html = await home.text();
-    const serverRequestId = readServerRequestId(home.headers);
-    if (KEY_PATTERN.test(html)) return { ok: false, detail: `GET ${target.pathname} ${tag} -> 키로 보이는 문자열이 첫 화면에 있음`, serverRequestId };
+    const home = await probe(fetchImpl, attackId, new URL('/', app));
+    const html = await home.response.text();
     const old = await Promise.all(['/auth-config.json', '/supabase.js']
       .map(path => probe(fetchImpl, attackId, new URL(path, app))));
-    if (old.some(item => item.status !== 404)) {
-      return { ok: false, detail: `GET ${target.pathname} ${tag} -> 예전 키 파일이 열릴 수 있음 (${old.map(item => `${item.path} HTTP ${item.status}`).join(', ')})`, serverRequestId };
-    }
-    return { ok: true, detail: `GET ${target.pathname} ${tag} -> 키 문자열 없음, 예전 키 파일 404 (${old.map(item => item.path).join(', ')})`, serverRequestId };
+    const key = KEY_PATTERN.test(html) ? 'present' : 'absent';
+    return [`${jsonLine(home)}, key string ${key}`, ...old.map(statusLine)].join('; ');
   },
 };
 
@@ -265,8 +223,8 @@ export async function runAttackChecks(config, { fetchImpl = fetch } = {}) {
         observed = NOT_RUN_LIVE_FAILED; // no publicAppUrl to probe - never report a committed stand-in
       } else {
         try {
-          const r = await live(app, config, fetchImpl, attackId);
-          observed = evidenceText(r.ok, r.detail, r.serverRequestId, new Date().toISOString());
+          // scripts/bundle.mjs rejects an observed longer than 300 chars; only a raw header value could ever get near that.
+          observed = (await live(app, config, fetchImpl, attackId)).slice(0, 300);
         } catch {
           observed = NOT_RUN_LIVE_FAILED; // this run's own request failed - not_run, never a committed stand-in
         }

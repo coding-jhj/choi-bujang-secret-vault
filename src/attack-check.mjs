@@ -22,6 +22,7 @@
 //    run, no matter how genuine that other run's evidence was. Root fix: this file no longer
 //    reads or replays ops/campaign-retest-results.json at all. A live probe either succeeds (its
 //    own real server id/status) or counts as not_run - never a stand-in from committed evidence.
+// 5) (14차, 2026-10-17) Judge couldn't link requests to attackIds: live GETs send X-Attack-Id, observed names it.
 // Checks that need a write request, a secret, or a logged-in test account (step 12's composite
 // cases) still cannot be sent from here without violating constraints this file must honor (no
 // write traffic, no secret) - those are always not_run too. The committed, request-id-backed
@@ -108,6 +109,10 @@ export const NOT_RUN_WRITE_OR_SECRET = 'not_run (실제 방어 증거는 ops/cam
 // 대신 채우지 않는다. 심판이 바로 이 대체 경로(이전의 describeCase(caseResult))를 지목했다.
 export const NOT_RUN_LIVE_FAILED = 'not_run';
 
+// The judge links each real request to its attackId by this request header; response-side fields
+// alone (status, server request ID) were rejected, so every live fetch below must carry it.
+export const ATTACK_ID_HEADER = 'X-Attack-Id';
+
 // The judge's own submission validator caps each observed string at 300 chars; serverRequestId
 // and checkedAt are the actual evidence, so when the descriptive text is long, clip only that text
 // (never the id/time) so the real evidence always survives intact.
@@ -136,17 +141,30 @@ const readServerRequestId = headers => headers.get('x-vercel-id') ?? headers.get
 const KEY_PATTERN = /sb_(?:publishable|secret)_[A-Za-z0-9_-]{8,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{8,}/u;
 const forgedToken = 'Bearer aaaaaaaaaaaa.bbbbbbbbbbbb.cccccccccccc';
 
-async function probe(fetchImpl, target, init) {
-  const response = await fetchImpl(target, { redirect: 'error', signal: AbortSignal.timeout(10000), ...init });
+// `[X-Attack-Id=<attackId>]`: the same value liveFetch() sends as a header, repeated in each observed text.
+const attackIdTag = attackId => `[${ATTACK_ID_HEADER}=${attackId}]`;
+
+// The only place a live request is sent, so every one carries `X-Attack-Id: <attackId>`. The header is
+// spread last: nothing in `init` (e.g. the forged Authorization below) can drop or override it.
+function liveFetch(fetchImpl, attackId, target, init = {}) {
+  return fetchImpl(target, {
+    redirect: 'error', signal: AbortSignal.timeout(10000), ...init,
+    headers: { ...init.headers, [ATTACK_ID_HEADER]: attackId },
+  });
+}
+
+async function probe(fetchImpl, attackId, target, init) {
+  const response = await liveFetch(fetchImpl, attackId, target, init);
   let json = false;
   try { await response.clone().json(); json = true; } catch { /* not JSON */ }
   const path = `${target.pathname}${target.search}`;
-  return { status: response.status, json, serverRequestId: readServerRequestId(response.headers), path };
+  return { status: response.status, json, serverRequestId: readServerRequestId(response.headers), path, attackId };
 }
 
-// `GET <path> -> HTTP <status>, JSON <예|아니오>` - the exact request address, status, and
-// JSON-ness the judge asked for, in one uniform shape for every closed-status probe below.
-const closedDetail = r => `GET ${r.path} -> HTTP ${r.status}, JSON ${r.json ? '예' : '아니오'}`;
+// `GET <path> [X-Attack-Id=<attackId>] -> HTTP <status>, JSON <예|아니오>` - the exact request address,
+// the attackId header it carried, status, and JSON-ness the judge asked for, in one uniform shape for
+// every closed-status probe below.
+const closedDetail = r => `GET ${r.path} ${attackIdTag(r.attackId)} -> HTTP ${r.status}, JSON ${r.json ? '예' : '아니오'}`;
 
 function originalApi(config) {
   const base = new URL(config.originalApiUrl);
@@ -157,66 +175,68 @@ function originalApi(config) {
   return base;
 }
 
-// attackId -> async (app, config, fetchImpl) -> { ok, detail, serverRequestId }. Only plain GET,
-// unauthenticated checks live here; anything needing a write request, a secret, or a logged-in
-// test account is deliberately absent and falls back to committed campaign-retest evidence below.
+// attackId -> async (app, config, fetchImpl, attackId) -> { ok, detail, serverRequestId }. Only plain GET,
+// unauthenticated checks live here; each reports the real request THIS run sent, tagged `X-Attack-Id`.
+// Anything needing a write request, a secret, or a logged-in test account is deliberately absent and
+// stays not_run (as does a probe whose own request fails); no fallback to committed evidence.
 const LIVE_PROBES = {
-  async no_login_list(app, config, fetchImpl) {
-    const r = await probe(fetchImpl, new URL('/api/notes', app));
+  async no_login_list(app, config, fetchImpl, attackId) {
+    const r = await probe(fetchImpl, attackId, new URL('/api/notes', app));
     return { ok: closedStatus(r.status) && r.json, detail: closedDetail(r), serverRequestId: r.serverRequestId };
   },
-  async forged_token_list(app, config, fetchImpl) {
-    const r = await probe(fetchImpl, new URL('/api/notes', app), { headers: { Authorization: forgedToken } });
+  async forged_token_list(app, config, fetchImpl, attackId) {
+    const r = await probe(fetchImpl, attackId, new URL('/api/notes', app), { headers: { Authorization: forgedToken } });
     return { ok: closedStatus(r.status) && r.json, detail: closedDetail(r), serverRequestId: r.serverRequestId };
   },
-  async no_login_item_read(app, config, fetchImpl) {
-    const r = await probe(fetchImpl, new URL(`/api/notes/${FAKE_ID}`, app));
+  async no_login_item_read(app, config, fetchImpl, attackId) {
+    const r = await probe(fetchImpl, attackId, new URL(`/api/notes/${FAKE_ID}`, app));
     return { ok: closedStatus(r.status) && r.json, detail: closedDetail(r), serverRequestId: r.serverRequestId };
   },
-  async no_login_announcements_list(app, config, fetchImpl) {
-    const r = await probe(fetchImpl, new URL('/api/announcements', app));
+  async no_login_announcements_list(app, config, fetchImpl, attackId) {
+    const r = await probe(fetchImpl, attackId, new URL('/api/announcements', app));
     return { ok: closedStatus(r.status) && r.json, detail: closedDetail(r), serverRequestId: r.serverRequestId };
   },
-  async no_login_device_status(app, config, fetchImpl) {
-    const r = await probe(fetchImpl, new URL('/api/devices/status', app));
+  async no_login_device_status(app, config, fetchImpl, attackId) {
+    const r = await probe(fetchImpl, attackId, new URL('/api/devices/status', app));
     return { ok: closedStatus(r.status) && r.json, detail: closedDetail(r), serverRequestId: r.serverRequestId };
   },
-  async no_login_ops_summary(app, config, fetchImpl) {
-    const r = await probe(fetchImpl, new URL('/api/ops/summary', app));
+  async no_login_ops_summary(app, config, fetchImpl, attackId) {
+    const r = await probe(fetchImpl, attackId, new URL('/api/ops/summary', app));
     return { ok: closedStatus(r.status) && r.json, detail: closedDetail(r), serverRequestId: r.serverRequestId };
   },
-  async original_api_no_key_read(app, config, fetchImpl) {
-    const r = await probe(fetchImpl, new URL('?select=id', originalApi(config)));
+  async original_api_no_key_read(app, config, fetchImpl, attackId) {
+    const r = await probe(fetchImpl, attackId, new URL('?select=id', originalApi(config)));
     return { ok: closedStatus(r.status) && r.json, detail: closedDetail(r), serverRequestId: r.serverRequestId };
   },
-  async public_data_json_read(app, config, fetchImpl) {
-    const r = await probe(fetchImpl, new URL('/data.json', app));
+  async public_data_json_read(app, config, fetchImpl, attackId) {
+    const r = await probe(fetchImpl, attackId, new URL('/data.json', app));
     return { ok: r.status === 404, detail: closedDetail(r), serverRequestId: r.serverRequestId };
   },
-  async aleph_json_open(app, config, fetchImpl) {
-    const r = await probe(fetchImpl, new URL('/aleph.json', app));
+  async aleph_json_open(app, config, fetchImpl, attackId) {
+    const r = await probe(fetchImpl, attackId, new URL('/aleph.json', app));
     return { ok: r.status === 200, detail: closedDetail(r), serverRequestId: r.serverRequestId };
   },
-  async nosniff_header(app, config, fetchImpl) {
+  async nosniff_header(app, config, fetchImpl, attackId) {
     const target = new URL('/', app);
-    const response = await fetchImpl(target, { redirect: 'error', signal: AbortSignal.timeout(10000) });
+    const response = await liveFetch(fetchImpl, attackId, target);
     const header = response.headers.get('x-content-type-options')?.toLowerCase();
     const ok = header === 'nosniff';
-    return { ok, detail: `GET ${target.pathname} -> X-Content-Type-Options ${header ?? '없음'}`,
+    return { ok, detail: `GET ${target.pathname} ${attackIdTag(attackId)} -> X-Content-Type-Options ${header ?? '없음'}`,
       serverRequestId: readServerRequestId(response.headers) };
   },
-  async public_files_no_key(app, config, fetchImpl) {
+  async public_files_no_key(app, config, fetchImpl, attackId) {
     const target = new URL('/', app);
-    const home = await fetchImpl(target, { redirect: 'error', signal: AbortSignal.timeout(10000) });
+    const tag = attackIdTag(attackId); // all three requests below (/, /auth-config.json, /supabase.js) carry it
+    const home = await liveFetch(fetchImpl, attackId, target);
     const html = await home.text();
     const serverRequestId = readServerRequestId(home.headers);
-    if (KEY_PATTERN.test(html)) return { ok: false, detail: `GET ${target.pathname} -> 키로 보이는 문자열이 첫 화면에 있음`, serverRequestId };
+    if (KEY_PATTERN.test(html)) return { ok: false, detail: `GET ${target.pathname} ${tag} -> 키로 보이는 문자열이 첫 화면에 있음`, serverRequestId };
     const old = await Promise.all(['/auth-config.json', '/supabase.js']
-      .map(path => probe(fetchImpl, new URL(path, app))));
+      .map(path => probe(fetchImpl, attackId, new URL(path, app))));
     if (old.some(item => item.status !== 404)) {
-      return { ok: false, detail: `GET ${target.pathname} -> 예전 키 파일이 열릴 수 있음 (${old.map(item => `${item.path} HTTP ${item.status}`).join(', ')})`, serverRequestId };
+      return { ok: false, detail: `GET ${target.pathname} ${tag} -> 예전 키 파일이 열릴 수 있음 (${old.map(item => `${item.path} HTTP ${item.status}`).join(', ')})`, serverRequestId };
     }
-    return { ok: true, detail: `GET ${target.pathname} -> 키 문자열 없음, 예전 키 파일 404 (${old.map(item => item.path).join(', ')})`, serverRequestId };
+    return { ok: true, detail: `GET ${target.pathname} ${tag} -> 키 문자열 없음, 예전 키 파일 404 (${old.map(item => item.path).join(', ')})`, serverRequestId };
   },
 };
 
@@ -245,7 +265,7 @@ export async function runAttackChecks(config, { fetchImpl = fetch } = {}) {
         observed = NOT_RUN_LIVE_FAILED; // no publicAppUrl to probe - never report a committed stand-in
       } else {
         try {
-          const r = await live(app, config, fetchImpl);
+          const r = await live(app, config, fetchImpl, attackId);
           observed = evidenceText(r.ok, r.detail, r.serverRequestId, new Date().toISOString());
         } catch {
           observed = NOT_RUN_LIVE_FAILED; // this run's own request failed - not_run, never a committed stand-in

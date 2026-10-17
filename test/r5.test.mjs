@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { deploymentIdentity } from '../scripts/deployment-identity.mjs';
-import { runAttackChecks, CASE_BY_ATTACK_ID, NOT_RUN_WRITE_OR_SECRET, NOT_RUN_LIVE_FAILED } from '../src/attack-check.mjs';
+import { runAttackChecks, CASE_BY_ATTACK_ID, NOT_RUN_WRITE_OR_SECRET, NOT_RUN_LIVE_FAILED, ATTACK_ID_HEADER } from '../src/attack-check.mjs';
 import { CAMPAIGN_CASES } from '../src/campaign-cases.mjs';
 
 const config = {
@@ -47,6 +47,20 @@ test('build identity uses Vercel Git and deployment metadata', () => {
 // never pass a `stored` option any more; there is no such option left to pass.
 const noNetwork = async () => { throw new Error('test: no network'); };
 
+// Stub that records every (target, init) it is called with and answers 401 JSON plus a server id.
+const recordingFetch = (body, serverId) => {
+  const calls = [];
+  const fetchImpl = async (target, init) => {
+    calls.push({ target, init });
+    return new Response(JSON.stringify(body), {
+      status: 401, headers: { 'content-type': 'application/json', 'x-vercel-id': serverId },
+    });
+  };
+  return { calls, fetchImpl };
+};
+// Case-insensitive header lookup that works for any init.headers shape (object, Headers, pairs).
+const headerOf = (call, name) => new Headers(call.init?.headers).get(name);
+
 test('attack check attackId 매핑은 전부 campaign-cases.mjs의 실제 항목을 가리킨다', () => {
   assert.equal(Object.keys(CASE_BY_ATTACK_ID).length, 20);
   for (const [attackId, caseId] of Object.entries(CASE_BY_ATTACK_ID)) {
@@ -65,13 +79,13 @@ const WRITE_OR_SECRET_IDS = ['no_login_create', 'no_login_restore', 'no_login_an
   'combined_restore_then_unsigned_and_cross_zone'];
 
 test('쓰기 요청·비밀값이 필요한 점검(합성 공격 포함)은 fetch가 뭘 돌려주든 항상 미실행이다', async () => {
-  const fetchImpl = async () => new Response(JSON.stringify({ ok: true }), {
-    status: 401, headers: { 'content-type': 'application/json', 'x-vercel-id': 'LEAKED-LIVE-PROBE' },
-  });
+  const { calls, fetchImpl } = recordingFetch({ ok: true }, 'LEAKED-LIVE-PROBE');
   const results = await runAttackChecks(config, { fetchImpl });
   for (const attackId of WRITE_OR_SECRET_IDS) {
     const item = results.find(r => r.attackId === attackId);
     assert.equal(item.observed, NOT_RUN_WRITE_OR_SECRET, attackId);
+    // 14차: not just labelled not_run - no request may go out carrying this attackId's header.
+    assert.ok(!calls.some(call => headerOf(call, 'x-attack-id') === attackId), `${attackId}: a request was sent`);
   }
 });
 
@@ -87,6 +101,55 @@ test('공개 GET 점검(no_login_list)은 이번 실행이 실제로 보낸 요�
   assert.ok(item.observed.startsWith('증거 확인됨'), item.observed);
   assert.ok(item.observed.includes('HTTP 401'), item.observed);
   assert.ok(item.observed.includes('icn1::live-test-id'), item.observed);
+});
+
+// 14차: the judge links each real request to its attackId by the X-Attack-Id request header, so the
+// header must be on EVERY fetch (nosniff_header and public_files_no_key do not go through probe())
+// and the observed text must name it.
+test('실제로 보내는 모든 GET 요청은 X-Attack-Id 헤더에 자기 attackId를 싣고, 관찰 문구에도 그렇게 적는다', async () => {
+  assert.equal(ATTACK_ID_HEADER, 'X-Attack-Id'); // the wire name the judge looks for
+  const liveIds = Object.keys(CASE_BY_ATTACK_ID).filter(id => !WRITE_OR_SECRET_IDS.includes(id));
+  const { calls, fetchImpl } = recordingFetch({ error: 'LOGIN_REQUIRED' }, 'icn1::header-test-id');
+  const results = await runAttackChecks(config, { fetchImpl });
+
+  // 13 fetches, counted from the code: ten probes send one request each (nine through probe(), plus
+  // nosniff_header's fetch of '/'), and public_files_no_key sends three ('/', '/auth-config.json',
+  // '/supabase.js' - this stub's body holds no key string, so it does not return after the first).
+  assert.equal(calls.length, 13);
+  const sent = calls.map(call => headerOf(call, 'x-attack-id'));
+  for (const id of sent) {
+    assert.ok(Object.hasOwn(CASE_BY_ATTACK_ID, id), `X-Attack-Id missing or unknown: ${id}`);
+    assert.ok(!WRITE_OR_SECRET_IDS.includes(id), `${id} is a write/secret check and must never be sent`);
+  }
+  assert.equal(new Set(sent).size, 11);
+  assert.deepEqual([...new Set(sent)].sort(), [...liveIds].sort());
+  for (const id of liveIds) {
+    assert.equal(sent.filter(value => value === id).length, id === 'public_files_no_key' ? 3 : 1, id);
+  }
+
+  // Moving the old direct fetches behind the header must not drop what they already set, and the
+  // forged Authorization must stay on forged_token_list only.
+  for (const call of calls) {
+    const id = headerOf(call, 'x-attack-id');
+    assert.equal(call.init.redirect, 'error', id);
+    assert.ok(call.init.signal instanceof AbortSignal, id);
+    assert.equal(call.init.method ?? 'GET', 'GET', id);
+    const authorization = headerOf(call, 'authorization');
+    if (id === 'forged_token_list') assert.ok(authorization, 'forged_token_list lost its Authorization header');
+    else assert.equal(authorization, null, `${id} must not carry Authorization`);
+  }
+  // The one request that leaves the app origin (Supabase REST) is tagged too.
+  const rest = calls.find(call => headerOf(call, 'x-attack-id') === 'original_api_no_key_read');
+  assert.equal(new URL(rest.target).hostname, new URL(config.originalApiUrl).hostname);
+
+  for (const id of liveIds) {
+    const item = results.find(r => r.attackId === id);
+    assert.ok(item.observed.startsWith('증거 확인됨'), item.observed);
+    assert.ok(item.observed.includes(`[${ATTACK_ID_HEADER}=${id}]`), item.observed);
+    assert.ok(item.observed.length <= 300, `${id}: ${item.observed.length}`);
+  }
+  const listed = results.find(r => r.attackId === 'no_login_list');
+  assert.ok(listed.observed.includes('GET /api/notes [X-Attack-Id=no_login_list] -> HTTP 401, JSON 예'), listed.observed);
 });
 
 // split_votes 핵심 회귀 테스트: 심판이 정확히 이 대체 경로(이전의 describeCase(caseResult))를

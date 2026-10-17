@@ -17,10 +17,12 @@ communication style and the senior bar. Nothing here relaxes it.
 
 ## 2. Evidence hierarchy
 
-Code > `docs/DECIDER_REQUEST.md` contract > README step records (can drift).
+Code > `docs/DECIDER_REQUEST.md` contract > step records (`docs/STAGE_LOG.md`,
+formerly README) (can drift).
 Verify against code before citing. Doc drift found so far:
 
-- README says attack-check reads `/data.json`; code only checks for 404.
+- `docs/STAGE_LOG.md` preamble says attack-check reads `/data.json`
+  for 0 memos; code only checks for 404.
 - `.gitignore` lists `public/supabase.js`, which is no longer built.
 
 ## 3. Hard constraints
@@ -38,7 +40,7 @@ Verify against code before citing. Doc drift found so far:
 - No `git reset --hard`. Rollback = `git status` + `git diff`, show what will
   disappear, wait for confirmation.
 - Do not change `aleph.config.json` `step` without asking:
-  `src/attack-check.mjs` throws unless step === 5 (code-read, re-verify).
+  `src/attack-check.mjs` throws unless step is an integer >= 5 (code-read, re-verify).
 - Commit only when asked. Never push without explicit confirmation: the repo is
   public and pushes trigger a Vercel deploy.
 
@@ -77,9 +79,9 @@ see it work. Cite a real incident only if it is the one in the step card.
 
 - "Works" or "fixed" = quoted output of a command actually run this session.
   Otherwise write "not run" and give the single command to run.
-- Checkpoint = a README section for the step, written in Korean to match the
-  existing records: what works, how to re-run, what was NOT verified, known
-  leftovers.
+- Checkpoint = a `docs/STAGE_LOG.md` entry for the step, written in Korean to
+  match the existing records: what works, how to re-run, what was NOT verified,
+  known leftovers.
 
 ## 8. Known leftovers (never claim solved)
 

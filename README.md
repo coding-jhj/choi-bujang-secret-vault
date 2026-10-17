@@ -29,7 +29,7 @@
 
 ## 설계 하이라이트
 
-**증거 기반 검증.** 이 저장소의 모든 방어 주장은 "그렇게 짰다"가 아니라 "실제로 요청을 보내 확인했고, 그 요청의 ID가 여기 있다"로 뒷받침된다. `scripts/campaign-retest.mjs`가 실제 배포에 공격/정상 요청을 보내 Vercel의 요청 ID(`x-vercel-id`)까지 포함한 결과를 커밋(`ops/campaign-retest-results.json`)하고, 화면(`/ops.html`)과 자기 점검(`src/attack-check.mjs`)은 전부 이 커밋된 증거만 읽어서 보여준다 — 실행하지 않은 점검을 통과로 보여주는 경로는 구조적으로 없다 (`mergeCampaign()`의 fail-closed 판정).
+**증거 기반 검증.** 이 저장소의 모든 방어 주장은 "그렇게 짰다"가 아니라 "실제로 요청을 보내 확인했고, 그 요청의 ID가 여기 있다"로 뒷받침된다. `scripts/campaign-retest.mjs`가 실제 배포에 공격/정상 요청을 보내 Vercel의 요청 ID(`x-vercel-id`)까지 포함한 결과를 커밋(`ops/campaign-retest-results.json`)하고, 화면(`/ops.html`)의 재시험 결과는 이 커밋된 증거를 읽어서 보여준다. 자기 점검(`src/attack-check.mjs`)은 커밋된 증거를 읽지 않고, 실행할 때마다 GET 전용 11건만 `X-Attack-Id` 헤더를 붙여 실제로 보내며 쓰기·비밀값·시험 계정이 필요한 나머지 9건은 `not_run`으로 표시하고 커밋된 증거로 대신 채우지 않는다 — 실행하지 않은 점검을 통과로 보여주는 경로는 구조적으로 없다 (화면은 `mergeCampaign()`의 fail-closed 판정, 자기 점검은 `not_run` 표기).
 
 **판정기(decider)와 탐지기(detect)는 화이트리스트로만 읽는다.** 요청 계약에 정의된 필드 이름만 읽고(`docs/DECIDER_REQUEST.md`), 역할·신원·기기 같은 미정의 필드는 절대 참조하지 않는다 — 프로토타입 오염, 위조 필드 주입에 대한 1차 방어선.
 

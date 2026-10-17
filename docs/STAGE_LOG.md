@@ -1,7 +1,7 @@
 # 단계별 작업 기록 (BYTE BACK 방어전 시작 틀 R5)
 
 > 이 문서는 1~12단계(와 앞으로 이어질 단계)의 상세 개발 일지입니다. 요약·소개는 루트 [README.md](../README.md)를 보세요.
-> **최신 단계: 12단계 (2026-10-15) — 탈환 작전실, `S12_SCREEN_MISMATCH` 근본 원인 수정 완료.**
+> **최신 단계: 12단계 (2026-10-17, 14차 `split_votes` 대응) — 탈환 작전실, 실시간 점검 요청에 `X-Attack-Id` 식별 헤더 부착.**
 > 새 단계를 추가하는 방법은 이 파일 맨 아래를 보세요.
 
 이 저장소는 1단계에서 학생 본인이 GitHub 저장소와 Vercel 배포를 만드는 출발점입니다. 가상 메모는 2단계부터 저장소 파일이 아니라 학습용 Supabase 표에 있습니다. 실제 학생 자료, 토큰, 비밀키를 넣지 마세요.
@@ -706,6 +706,16 @@ node --test test/campaign-retest.test.mjs → 2개 모두 통과
     - 수정: `NOT_RUN_WRITE_OR_SECRET`을 리터럴 `not_run`으로 **시작**하되, 그 뒤에 "실제 방어 증거는 ops/campaign-retest-results.json과 /ops.html에서 확인 가능 — 이번 실행이 보낸 요청은 아님"이라는 안내를 덧붙였습니다. 심판이 금지한 "과거 결과를 이번 실행의 통과처럼 적는 것"이 아니라, 진짜 증거가 **어디** 있는지와 그게 **이번 실행이 아니라는 것**을 동시에 밝히는 것입니다.
     - 확인한 것: `node --test "test/*.test.mjs"` → tests 94, pass 94, fail 0.
     - **정직하게 밝히는 한계**: 지난 5번의 수정이 전부 이 몬스터를 못 움직였습니다. 이번 수정도 같은 운명일 수 있습니다 — 추측입니다.
+
+13. **(2026-10-17) 14차 재발(split_votes) — 요청 자체에 `attackId` 식별자가 없었던 것이 13차례 반복 실패의 미해결 공통 원인, 실시간 GET 11건 전부에 `X-Attack-Id` 헤더 부착.** 12번 수정 뒤 재제출 결과도 53/100, 코드 `split_votes`였습니다. 이번 심판 문구: "심판은 `no_login_list` 등 11개 점검과 연결되는 요청을 찾지 못했습니다. `src/attack-check.mjs`에서 실제 요청마다 심판이 대조할 `attackId` 식별 정보를 남기고, 실제 HTTP 상태와 JSON 응답 여부를 기록하세요. 보내지 않은 요청은 `observed`를 `not_run`으로 두세요. 화면은 고치지 마세요." 코드를 다시 대조해 보니 3차~13차 수정은 전부 **응답을 어떻게 적는가**(observed 문구, 서버 요청ID, `not_run` 리터럴, 경로·JSON 여부, 증거 커밋 순서)만 고쳤고, **요청 자체**에는 attackId가 어디에도 실리지 않았습니다 — 파일이 보내는 요청 헤더는 위조 토큰 점검용 `Authorization` 하나뿐이었습니다. 심판이 11건 중 일부가 아니라 **전부**를 짝짓지 못했다는 것과 정확히 맞는 설명입니다.
+    - 수정(`src/attack-check.mjs`): 모든 fetch가 단일 경로 `liveFetch()`를 거치며 요청 헤더 `X-Attack-Id: <attackId>`를 붙입니다(상수 `ATTACK_ID_HEADER`). `forged_token_list`의 위조 `Authorization`은 그대로 함께 나갑니다. observed에는 `GET /api/notes [X-Attack-Id=no_login_list] -> HTTP 401, JSON 예`처럼 어떤 표식이 나갔는지 적습니다. 20개 attackId, `EXPECTED`, `not_run` 9건의 동작과 문구, 결과 키(`attackId`/`expected`/`observed`), step 가드는 바꾸지 않았습니다. `LIVE_PROBES` 위의 낡은 주석("커밋된 증거로 폴백")도 현재 동작대로 고쳤습니다.
+    - 테스트(`test/r5.test.mjs`): 새 테스트 1개 — fetch 13회(10건은 1회, `public_files_no_key`는 3회) 전부 헤더 보유, 헤더 값 11종 = 실시간 점검 ID 집합, 쓰기·복합 9건의 ID는 어떤 요청에도 실리지 않음, `Authorization`은 `forged_token_list` 요청에만 존재, 모든 요청이 GET·`redirect: 'error'` 유지. 헤더를 빠뜨리는 변형 5가지(nosniff 요청 누락, 홈 요청 누락, 헤더 순서 역전으로 위조 토큰 유실, Authorization 삭제, observed 표기 누락)에서 테스트가 실패하는 것을 사본에서 확인했습니다. `npm run test:r5` → tests 8, pass 8, fail 0.
+    - 실측(2026-10-17 02:34 UTC, 배포 `afac735` 대상, GET만 전송): 11건 "증거 확인됨", 9건 `not_run`, observed 최장 199자(300자 제한 안, 잘림 없음). Supabase REST 점검(`original_api_no_key_read`)도 헤더가 붙은 채 HTTP 401 JSON으로 거부됐습니다.
+    - 서버 쪽 확인: `api/`·`src/`에 요청 헤더 허용목록·CORS·요청 로깅이 없어(요청 헤더를 읽는 곳은 `src/session-cookie.mjs`의 cookie/origin/host/sec-fetch-site/authorization만) 새 헤더는 거부되지도 저장되지도 않습니다. 심판이 attackId를 볼 수 있는 곳은 제출 JSON과, 심판이 `attack-check.mjs`를 재실행할 때의 요청 자체입니다.
+    - 문서 드리프트 수정: README 32행(화면은 커밋된 증거를, 자기 점검은 실시간 11건 + `not_run` 9건을 보여준다), 프로젝트 `CLAUDE.md`(step 가드는 "정수이면서 5 이상", 단계 기록 위치는 이 파일, `/data.json` 드리프트 항목은 이 파일 23행을 가리킴).
+    - **고치지 않은 것(알려진 남은 문제)**: `/api/ops/summary`의 `sameDeployment`는 "지금 배포 커밋 == 증거 파일의 `deployedCommit`" 정확 비교인데(`src/ops-api.mjs` 110~116행), 증거 파일은 그 파일을 담은 커밋 안에 번들돼 배포되므로 **구조적으로 true가 될 수 없고** `/ops.html`은 항상 "지금 배포와 다른 커밋 (다시 돌려야 함)"을 표시합니다(`public/ops.html` 164~165행). 심판이 이번에 "화면은 고치지 마세요"라고 했으므로 이번 회차에는 건드리지 않고 기록만 남깁니다. 후보 해법: (가) 문구를 두 커밋 값을 그대로 보여주는 식으로 바꾸기, (나) `vercel.json` `ignoreCommand`로 증거 전용 커밋의 배포를 건너뛰고 요약 API가 증거 파일을 공개 저장소에서 실시간으로 읽기.
+    - 확인하지 못한 것: 심판이 이 헤더를 실제로 대조에 쓰는지는 재제출 결과로만 확인됩니다. 이 항목을 쓰는 시점에 실배포 재시험(`scripts/campaign-retest.mjs`)과 `npm run bundle`은 아직 돌리지 않았습니다 — 코드 커밋·배포 확인 뒤 깨끗한 트리에서 돌려 증거만 별도 저장점으로 커밋합니다.
+    - 다시 확인하는 방법: `npm run test:r5`. 실측은 `node --input-type=module -e "import {readFile} from 'node:fs/promises'; import {runAttackChecks} from './src/attack-check.mjs'; const c=JSON.parse(await readFile('aleph.config.json','utf8')); for (const x of await runAttackChecks(c)) console.log(x.attackId,'|',x.observed);"` (GET만 보냄).
 
 **지금 상태:** `npm install`은 패키지 10개 추가, 취약점 0건으로 오류 없이 끝납니다(`aleph.config.json`의 `step`도 12로 반영됨). 심판의 "41종"과 이 저장소의 "58건"은 여전히 같은 숫자가 아닙니다 — 위 "57건과 심판의 '41종'은 같은 숫자가 아닙니다" 절 참고(현재는 58건).
 

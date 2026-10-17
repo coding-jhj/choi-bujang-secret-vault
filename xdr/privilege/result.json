@@ -1,0 +1,167 @@
+{
+  "schema": "aleph.xdr.result.v1",
+  "moduleKey": "privilege",
+  "decisions": [
+    {
+      "alertId": "pv-01",
+      "action": "alert",
+      "confidence": 0.55,
+      "reason": "관리자 그룹 추가로 T1068/T1078 권한 상승 패턴과 일치합니다 (rule.level 12)."
+    },
+    {
+      "alertId": "pv-02",
+      "action": "block",
+      "confidence": 0.95,
+      "reason": "권한 획득 직후 즉시 악용, 관리자 명령 실행 확인로 T1068/T1078 권한 상승 패턴과 일치합니다 (rule.level 12)."
+    },
+    {
+      "alertId": "pv-03",
+      "action": "block",
+      "confidence": 0.9,
+      "reason": "관리자 명령 실행 확인, 처음 보는 접속 주소, 이례적인 시간대로 T1068/T1078 권한 상승 패턴과 일치합니다 (rule.level 11)."
+    },
+    {
+      "alertId": "pv-04",
+      "action": "block",
+      "confidence": 0.97,
+      "reason": "관리자 그룹 추가, 권한 획득 직후 즉시 악용, 관리자 명령 실행 확인로 T1068/T1078 권한 상승 패턴과 일치합니다 (rule.level 12)."
+    },
+    {
+      "alertId": "pv-05",
+      "action": "block",
+      "confidence": 0.9,
+      "reason": "관리자 그룹 추가, 같은 출발지에서 계정 4개 동시 권한 변경로 T1068/T1078 권한 상승 패턴과 일치합니다 (rule.level 10)."
+    },
+    {
+      "alertId": "pv-06",
+      "action": "alert",
+      "confidence": 0.75,
+      "reason": "처음 보는 접속 주소, 다른 계정 권한으로의 세션 전환로 T1068/T1078 권한 상승 패턴과 일치합니다 (rule.level 12)."
+    },
+    {
+      "alertId": "pv-07",
+      "action": "block",
+      "confidence": 0.9500000000000001,
+      "reason": "관리자 그룹 추가, 관리자 명령 실행 확인, 이례적인 시간대로 T1068/T1078 권한 상승 패턴과 일치합니다 (rule.level 11)."
+    },
+    {
+      "alertId": "pv-08",
+      "action": "alert",
+      "confidence": 0.75,
+      "reason": "관리자 명령 실행 확인, 다른 계정 권한으로의 세션 전환로 T1068/T1078 권한 상승 패턴과 일치합니다 (rule.level 12)."
+    },
+    {
+      "alertId": "pv-09",
+      "action": "block",
+      "confidence": 0.97,
+      "reason": "관리자 그룹 추가, 같은 출발지에서 계정 2개 동시 권한 변경, 권한 획득 직후 즉시 악용로 T1068/T1078 권한 상승 패턴과 일치합니다 (rule.level 10)."
+    },
+    {
+      "alertId": "pv-10",
+      "action": "record",
+      "confidence": 0.16999999999999998,
+      "reason": "권한 상승 관련 태그는 있으나 취소되었거나 실제 변경·악용으로 이어지지 않았습니다."
+    },
+    {
+      "alertId": "pv-11",
+      "action": "record",
+      "confidence": 0.19,
+      "reason": "권한 상승 관련 태그는 있으나 취소되었거나 실제 변경·악용으로 이어지지 않았습니다."
+    },
+    {
+      "alertId": "pv-12",
+      "action": "alert",
+      "confidence": 0.5,
+      "reason": "관리자 명령 실행 확인로 T1068/T1078 권한 상승 패턴과 일치합니다 (rule.level 5)."
+    },
+    {
+      "alertId": "pv-13",
+      "action": "record",
+      "confidence": 0.16999999999999998,
+      "reason": "권한 상승 관련 태그는 있으나 취소되었거나 실제 변경·악용으로 이어지지 않았습니다."
+    },
+    {
+      "alertId": "pv-14",
+      "action": "record",
+      "confidence": 0.2,
+      "reason": "권한 상승 관련 태그는 있으나 취소되었거나 실제 변경·악용으로 이어지지 않았습니다."
+    },
+    {
+      "alertId": "pv-15",
+      "action": "record",
+      "confidence": 0.25,
+      "reason": "MITRE T1068/T1078 신호는 있으나 추가 근거가 약해 애매합니다 (rule.level 6)."
+    },
+    {
+      "alertId": "pv-16",
+      "action": "record",
+      "confidence": 0.19,
+      "reason": "권한 상승 관련 태그는 있으나 취소되었거나 실제 변경·악용으로 이어지지 않았습니다."
+    },
+    {
+      "alertId": "pv-17",
+      "action": "record",
+      "confidence": 0.15000000000000002,
+      "reason": "권한 상승 관련 태그는 있으나 취소되었거나 실제 변경·악용으로 이어지지 않았습니다."
+    },
+    {
+      "alertId": "pv-18",
+      "action": "record",
+      "confidence": 0.11,
+      "reason": "MITRE T1068/T1078(권한 상승·계정 도용) 신호가 없는 평범한 이벤트입니다."
+    },
+    {
+      "alertId": "pv-19",
+      "action": "record",
+      "confidence": 0.11,
+      "reason": "MITRE T1068/T1078(권한 상승·계정 도용) 신호가 없는 평범한 이벤트입니다."
+    },
+    {
+      "alertId": "pv-20",
+      "action": "record",
+      "confidence": 0.09,
+      "reason": "MITRE T1068/T1078(권한 상승·계정 도용) 신호가 없는 평범한 이벤트입니다."
+    },
+    {
+      "alertId": "pv-21",
+      "action": "record",
+      "confidence": 0.11,
+      "reason": "MITRE T1068/T1078(권한 상승·계정 도용) 신호가 없는 평범한 이벤트입니다."
+    },
+    {
+      "alertId": "pv-22",
+      "action": "record",
+      "confidence": 0.11,
+      "reason": "MITRE T1068/T1078(권한 상승·계정 도용) 신호가 없는 평범한 이벤트입니다."
+    },
+    {
+      "alertId": "pv-23",
+      "action": "record",
+      "confidence": 0.09,
+      "reason": "MITRE T1068/T1078(권한 상승·계정 도용) 신호가 없는 평범한 이벤트입니다."
+    },
+    {
+      "alertId": "pv-24",
+      "action": "record",
+      "confidence": 0.11,
+      "reason": "MITRE T1068/T1078(권한 상승·계정 도용) 신호가 없는 평범한 이벤트입니다."
+    },
+    {
+      "alertId": "pv-25",
+      "action": "record",
+      "confidence": 0.11,
+      "reason": "MITRE T1068/T1078(권한 상승·계정 도용) 신호가 없는 평범한 이벤트입니다."
+    },
+    {
+      "alertId": "pv-26",
+      "action": "record",
+      "confidence": 0.09,
+      "reason": "MITRE T1068/T1078(권한 상승·계정 도용) 신호가 없는 평범한 이벤트입니다."
+    }
+  ],
+  "counts": {
+    "block": 6,
+    "alert": 4,
+    "record": 16
+  }
+}

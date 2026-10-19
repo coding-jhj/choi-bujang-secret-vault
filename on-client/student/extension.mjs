@@ -247,6 +247,19 @@ function renderEventDetail(event) {
   detail.appendChild(textEl('p', `접속: ${accessStatusText(state.access)}`));
   detail.appendChild(textEl('p', `세션: ${sessionStatusText(state.session)}`));
   detail.appendChild(textEl('p', `기기: ${deviceStatusText(state.device)}`));
+
+  // 연결되지 않은 조치는 비활성 안내 버튼으로만 보여 준다. 클릭 처리기를 두지 않고 disabled 로 고정해 어떤 요청도 보내지 않는다.
+  const actions = Array.isArray(event.supportedActions) ? event.supportedActions : [];
+  if (actions.length > 0) {
+    detail.appendChild(textEl('h5', '조치'));
+    detail.appendChild(textEl('p', '조치 실행 연결은 준비 중입니다. 아래 조치는 아직 지원하지 않으며, 눌러도 요청을 보내지 않고 실행되지 않습니다.'));
+    for (const action of actions) {
+      const button = textEl('button', `${String(action)} 미지원`);
+      button.type = 'button';
+      button.disabled = true;
+      detail.appendChild(button);
+    }
+  }
   return detail;
 }
 
@@ -317,12 +330,109 @@ function renderEventsSection({ status, mode, data, error }, onChange) {
   return container;
 }
 
+// 진단 정보는 허용 목록 6개 필드만 읽는다. 목록에 없는 필드(열쇠·토큰 등)는 화면·복사 내용에 절대 넣지 않는다.
+const DIAGNOSTICS_TOP_FIELDS = ['requestId', 'component', 'version', 'checkedAt'];
+
+function safeValue(value) {
+  return value == null ? '없음' : String(value);
+}
+
+function diagnosticsSafeLines(data) {
+  const lines = DIAGNOSTICS_TOP_FIELDS.map((key) => `${key}: ${safeValue(data?.[key])}`);
+  lines.push(`engine.mode: ${safeValue(data?.engine?.mode)}`);
+  lines.push(`engine.code: ${safeValue(data?.engine?.code)}`);
+  return lines;
+}
+
+// 실패한 자료에 시간 초과 여부와 사람이 직접 하는 다시 시도 안내를 덧붙인다. 자동으로 다시 요청하지 않는다.
+function appendFailureGuide(section, resource, what) {
+  if (resource?.status !== 'error') return;
+  if (/TIMEOUT/.test(String(resource.error?.code ?? ''))) {
+    section.appendChild(textEl('p', `시간 초과: ${what} 요청이 제한 시간 안에 끝나지 않았습니다.`));
+  }
+  section.appendChild(textEl('p', '연결 상태를 확인한 뒤, 다시 시도는 위쪽 다시 불러오기 버튼을 직접 누르세요. 자동으로 다시 요청하지 않습니다.'));
+}
+
+function renderNotificationsSection(notifications) {
+  const section = document.createElement('section');
+  section.appendChild(textEl('h3', '알림'));
+  const list = Array.isArray(notifications) ? notifications : [];
+  if (list.length === 0) {
+    section.appendChild(textEl('p', '주의할 알림이 없습니다'));
+  } else {
+    const ul = document.createElement('ul');
+    for (const item of list) {
+      ul.appendChild(textEl('li', `[${safeValue(item?.resource)}] ${safeValue(item?.code)}: ${safeValue(item?.message)}`));
+    }
+    section.appendChild(ul);
+    section.appendChild(textEl('p', '불러오기 실패 알림이 있으면 연결 상태를 확인한 뒤 위쪽 다시 불러오기 버튼을 직접 누르세요.'));
+  }
+  return section;
+}
+
+function renderDiagnosticsSection(diagnostics) {
+  const section = document.createElement('section');
+  section.appendChild(textEl('h3', '진단 정보'));
+  if (diagnostics?.status === 'idle') {
+    section.appendChild(textEl('p', '진단 정보를 아직 불러오지 않았습니다. 필요하면 도움정보 칸에서 직접 불러오세요.'));
+  } else if (appendResourceState(section, diagnostics, '진단')) {
+    const data = diagnostics.data;
+    for (const line of diagnosticsSafeLines(data)) section.appendChild(textEl('p', line));
+    section.appendChild(textEl('p', '이 정보는 도움을 요청할 때 담당자에게 전달하도록 복사하는 점검용 정보입니다. 열쇠·토큰 같은 비밀값은 포함하지 않으며, 누를 때만 복사되고 어디에도 자동 전송되지 않습니다.'));
+
+    const button = textEl('button', '도움정보 복사');
+    button.type = 'button';
+    const result = document.createElement('p');
+    button.addEventListener('click', () => {
+      const text = diagnosticsSafeLines(data).join('\n');
+      const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
+      if (typeof clipboard?.writeText !== 'function') {
+        result.textContent = '이 환경에서는 자동 복사를 사용할 수 없습니다. 위 내용을 직접 선택해 복사하세요.';
+        return;
+      }
+      try {
+        Promise.resolve(clipboard.writeText(text)).then(
+          () => { result.textContent = '도움정보를 복사했습니다.'; },
+          () => { result.textContent = '복사하지 못했습니다. 위 내용을 직접 선택해 복사하세요.'; },
+        );
+      } catch {
+        result.textContent = '복사하지 못했습니다. 위 내용을 직접 선택해 복사하세요.';
+      }
+    });
+    section.appendChild(button);
+    section.appendChild(result);
+  }
+  appendFailureGuide(section, diagnostics, '진단 정보');
+  appendModeNote(section, diagnostics?.mode);
+  return section;
+}
+
+// 기기·세션 표시는 13단계 함수를 그대로 다시 쓰고, 관측 범위·실패 안내만 덧붙인다.
+function renderStatusSection({ devices, sessions, notifications, diagnostics, mode } = {}) {
+  const container = document.createElement('div');
+
+  const devicesSection = renderDevicesSection(devices);
+  devicesSection.appendChild(textEl('p', '내 이름으로 등록되고 회수되지 않은 기기를 최대 100개까지 보여 주며, 지금 쓰는 기기가 맨 앞에 옵니다.'));
+  appendFailureGuide(devicesSection, devices, '기기 목록');
+  container.appendChild(devicesSection);
+
+  const sessionsSection = renderSessionsSection(sessions);
+  sessionsSection.appendChild(textEl('p', '세션은 지금 검증된 연결 하나만 보여 줍니다. 지난 세션 목록이 아닙니다.'));
+  appendFailureGuide(sessionsSection, sessions, '세션');
+  container.appendChild(sessionsSection);
+
+  container.appendChild(renderNotificationsSection(notifications));
+  container.appendChild(renderDiagnosticsSection(diagnostics));
+  appendModeNote(container, mode);
+  return container;
+}
+
 export function createStudentView({ onChange } = {}) {
   return {
     renderIdentity(input) { return renderIdentitySection(input); },
     renderDecision(input) { return renderDecisionSection(input); },
     renderEvents(input) { return renderEventsSection(input ?? {}, onChange); },
-    renderStatus() { return '학생 구현 대기: 기기·세션·알림과 연결 점검 상태를 구분하세요.'; },
+    renderStatus(input) { return renderStatusSection(input ?? {}); },
     renderVulnerabilities() { return '학생 구현 대기: 정확한 설치 버전·OSV 출처·조회 시각·부분 결과·조회 실패를 구분하세요.'; },
     renderAiConnection() { return '학생 구현 대기: 모델 응답 점검과 실제 사건 설명을 구분하고 AI 오류·취소·수동 복구를 안내하세요.'; },
     renderExplanation() { return '학생 구현 대기: 선택한 사건의 근거·규칙·현재 상태와 AI 설명을 연결하세요. 제안은 자동 실행하지 않습니다.'; },

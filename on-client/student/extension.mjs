@@ -639,13 +639,108 @@ function renderActionSection({ status, event, actionId, target, receipt, observa
   return container;
 }
 
+const VULNERABILITY_SCAN_STATUS_LABEL = {
+  complete: '모두 조회(complete)',
+  partial: '일부 조회 실패(partial)',
+  not_checked: '아직 조회 안 함(not_checked)',
+  not_configured: '조회 준비 미완료(not_configured)',
+  unverifiable: 'lock 파일 확인 불가(unverifiable)',
+};
+
+const PACKAGE_VULNERABILITY_STATUS_LABEL = {
+  known_vulnerabilities: '알려진 항목 있음(known_vulnerabilities)',
+  none_found: '알려진 항목 없음(none_found)',
+  unverifiable: '조회 확인 불가(unverifiable)',
+};
+
+// data.status가 not_configured/unverifiable일 땐 lockfileVersion/lockfileHash 자체가 없으므로
+// 그 줄을 생략한다(값이 없다는 걸 "확인 불가"로 억지로 보여주면 "조회는 했는데 값을 못 받았다"는
+// 오해를 줄 수 있음 — status 문구 자체가 "조회 안 됨"을 이미 설명한다). unverifiable 패키지에도
+// 받은 취약점 ID가 있으면 지우지 않고 그대로 보여준다.
+function renderVulnerabilitiesSection({ status, mode, data, error } = {}) {
+  const container = document.createElement('div');
+
+  if (status === 'idle') {
+    container.appendChild(textEl('p', '조회 전'));
+    appendModeNote(container, mode);
+    return container;
+  }
+
+  if (status === 'loading') {
+    container.appendChild(textEl('p', '조회 중'));
+    appendModeNote(container, mode);
+    return container;
+  }
+
+  if (status === 'error') {
+    container.appendChild(textEl('p', `조회 실패: ${error?.message ?? '확인 불가'}`));
+    container.appendChild(textEl('p', `오류 코드: ${error?.code ?? '확인 불가'}`));
+    appendModeNote(container, mode);
+    return container;
+  }
+
+  if (status === 'ok' && data != null) {
+    const scanStatus = Object.hasOwn(VULNERABILITY_SCAN_STATUS_LABEL, data.status)
+      ? VULNERABILITY_SCAN_STATUS_LABEL[data.status]
+      : `확인 불가(${data.status})`;
+    container.appendChild(textEl('p', `조회 상태: ${scanStatus}`));
+
+    if (data.lockfileVersion != null) container.appendChild(textEl('p', `lockfileVersion: ${data.lockfileVersion}`));
+    if (data.lockfileHash != null) container.appendChild(textEl('p', `lockfileHash: ${data.lockfileHash}`));
+    if (data.checkedAt != null) container.appendChild(textEl('p', `조회 시각: ${data.checkedAt}`));
+
+    const packages = Array.isArray(data.packages) ? data.packages : [];
+    if (packages.length === 0) {
+      container.appendChild(textEl('p', '표시할 패키지가 없습니다.'));
+    } else {
+      for (const pkg of packages) {
+        const row = document.createElement('div');
+        if (pkg?.name != null) row.setAttribute('data-student-package-name', pkg.name);
+        if (pkg?.version != null) row.setAttribute('data-student-package-version', pkg.version);
+
+        row.appendChild(textEl('p', `${pkg?.name ?? '확인 불가'} ${pkg?.version ?? '확인 불가'}`));
+        row.appendChild(textEl('p', `출처: ${pkg?.source ?? '확인 불가'}`));
+        row.appendChild(textEl('p', `조회 시각: ${pkg?.checkedAt ?? '확인 불가'}`));
+
+        const pkgStatusLabel = Object.hasOwn(PACKAGE_VULNERABILITY_STATUS_LABEL, pkg?.status)
+          ? PACKAGE_VULNERABILITY_STATUS_LABEL[pkg.status]
+          : `확인 불가(${pkg?.status})`;
+
+        if (pkg?.status === 'unverifiable') {
+          row.appendChild(textEl('p', `일부 확인·전체 조회 확인 불가(${pkgStatusLabel})`));
+        } else {
+          row.appendChild(textEl('p', `상태: ${pkgStatusLabel}`));
+        }
+
+        const vulns = Array.isArray(pkg?.vulnerabilities) ? pkg.vulnerabilities : [];
+        if (vulns.length > 0) {
+          for (const vuln of vulns) {
+            row.appendChild(textEl('p', `${vuln?.id ?? '확인 불가'} — 수정: ${vuln?.modified ?? '확인 불가'}`));
+          }
+        } else if (pkg?.status === 'none_found') {
+          row.appendChild(textEl('p', '조회 범위에서 알려진 항목이 없습니다(none_found).'));
+        }
+
+        container.appendChild(row);
+      }
+    }
+
+    appendModeNote(container, mode);
+    return container;
+  }
+
+  container.appendChild(textEl('p', '조회 결과: 확인 불가(unknown)'));
+  appendModeNote(container, mode);
+  return container;
+}
+
 export function createStudentView({ onChange } = {}) {
   return {
     renderIdentity(input) { return renderIdentitySection(input); },
     renderDecision(input) { return renderDecisionSection(input); },
     renderEvents(input) { return renderEventsSection(input ?? {}, onChange); },
     renderStatus(input) { return renderStatusSection(input ?? {}); },
-    renderVulnerabilities() { return '학생 구현 대기: 정확한 설치 버전·OSV 출처·조회 시각·부분 결과·조회 실패를 구분하세요.'; },
+    renderVulnerabilities(input) { return renderVulnerabilitiesSection(input ?? {}); },
     renderAiConnection(input) { return renderAiConnectionSection(input ?? {}); },
     renderExplanation(input) { return renderExplanationSection(input ?? {}); },
     renderAction(input) { return renderActionSection(input ?? {}); },

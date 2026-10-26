@@ -1086,3 +1086,57 @@ npm --prefix on-client run check
 (기록 없음 — 아직 판정 피드백을 받지 않았습니다.)
 
 **다시 실행하는 방법:** `npm --prefix on-client run check`(구문 검사). 브라우저로 `prepared` 이후 상태를 보려면 운영자 측 연동 시스템(`--alekov-actions` 설정) 준비가 먼저 필요합니다.
+
+---
+
+## 20단계: 사용 라이브러리와 취약점 정보 대조 — renderVulnerabilities 구현
+
+### 막은 공격
+
+취약점 조회가 실패했거나 아직 안 됐는데도 "취약점 없음"처럼 보이면, 실제로는 확인 안 된 패키지가 안전하다고 오인될 수 있습니다. `renderVulnerabilitiesSection`은 `data.status`의 `not_configured`(프로젝트 경로 미설정)와 `not_checked`(승인된 조회 대상 없음)를 서로 다른 원인으로 정확히 구분하고 — 조사 결과 과제 안내문이 이 둘을 같은 원인("허용 목록이 비어서")처럼 설명했지만 실제 코드는 완전히 다른 조건으로 갈리는 것을 확인해, 설명 문구를 지어내지 않고 안내문의 공식 예시 문구만 그대로 썼습니다. 패키지 단위로도 `unverifiable`(그 패키지만 확인 불가)을 `none_found`(실제로 없음)와 다른 문구로 보여주고, 일부 조회 실패(`partial`) 상황에서도 이미 받은 취약점 ID를 지우지 않습니다. `data.status`가 `not_configured`/`unverifiable`일 때는 `lockfileVersion`/`lockfileHash` 키 자체가 입력에 없다는 걸 코드로 확인했으므로, 그 줄을 "확인 불가"로 억지로 채우지 않고 생략해 "조회를 했는데 값을 못 받았다"는 오해를 막습니다.
+
+### 무엇을 만들었나
+
+`renderVulnerabilitiesSection({status, mode, data, error})` 완성(커밋 범위: 이 함수와 상수 2개, 96줄):
+
+- `idle`/`loading`/`error` — "조회 전"/"조회 중"/"조회 실패: {message}" + 오류 코드(없으면 "확인 불가")
+- `ok`: `data.status` 5개(`complete`/`partial`/`not_checked`/`not_configured`/`unverifiable`)를 원래 값+한국어 뜻으로 표시. `lockfileVersion`/`lockfileHash`/`checkedAt`은 값이 있을 때만 표시(없으면 줄 자체 생략).
+- `data.packages` 각 행: `name`+`version`+`source`+`checkedAt` + 패키지 상태(`known_vulnerabilities`/`none_found`/`unverifiable`, `unverifiable`은 "일부 확인·전체 조회 확인 불가" 강조 문구) + 취약점마다 `id`+`modified`. `unverifiable` 패키지에 이미 받은 취약점 ID가 있으면 지우지 않고 그대로 표시.
+- 각 패키지 행에 `data-student-package-name`/`data-student-package-version` 속성 부여.
+- `data: null`, `data.packages`가 배열이 아닌 경우, 이상한 `data.status`/최상위 `status` 값 전부 방어적으로 "확인 불가" 계열로 처리.
+- 재조회/취소/늦은 응답 처리는 호스트(`app.js`)가 이미 이중 세대 카운터로 보장함을 코드 조사로 확인했으므로(19단계의 `receipt` 잔존 문제와 달리, 상태 전이마다 객체를 통째로 새로 만들어 이전 필드가 안 남음), 학생 코드는 별도 로직 없이 "입력만 보고 새로 그리기" 원칙만 지켰습니다.
+
+### 확인한 것 (실제로 실행한 결과)
+
+검증 기준 커밋: 이 커밋(작업 트리).
+
+1. 구문 검사:
+```
+npm --prefix on-client run check
+> node --check student/extension.mjs
+(오류 출력 없음 = 통과)
+```
+
+2. `renderVulnerabilities`를 실제 모듈에서 Node로 직접 호출(최소 DOM 스텁, 코드 복사본 아님)해 14개 케이스를 실행했습니다. **구현한 에이전트가 1회, 검토한 제가 독립적으로 재실행 1회**, 동일한 결과를 확인했습니다:
+   - `not_configured`/`unverifiable` → `lockfileVersion`/`lockfileHash` 줄이 실제로 생략됨
+   - `not_checked`/`complete`/`partial` → 값이 있으면 정상 표시됨
+   - `unverifiable` 패키지에 기존 취약점 ID(`OSV-OLD-1`)가 있을 때 지워지지 않고 그대로 표시됨
+   - `complete`에서 `known_vulnerabilities`(취약점 2개)와 `none_found`가 각각 올바른 문구로 구분됨
+   - `partial`에서 `known_vulnerabilities`/`unverifiable`/`none_found` 세 패키지가 섞여도 각각 올바르게 처리됨
+   - `data: null`, `packages`가 배열이 아닌 경우, 이상한 `data.status`("weird")와 최상위 `status`("weird-top") 전부 예외 없이 "확인 불가" 계열로 방어됨
+   - `data-student-package-name`/`data-student-package-version` 속성이 패키지마다 정확히 붙음
+   - 예외(크래시) 0건
+
+3. `git diff --stat`로 변경 범위가 `renderVulnerabilitiesSection`과 연결 한 줄로만 제한됨을 확인(96줄 추가/1줄 삭제).
+
+### 확인하지 못한 것
+
+- 실제 브라우저에서 "설치 패키지 조회" 버튼을 눌러보는 것은 하지 않았습니다. 조사 결과 서버 쪽 조회 기능은 `ON_PROJECT_DIRECTORY`/`ON_APPROVED_PUBLIC_PACKAGES` 환경변수 설정이 필요하며, 기본 실행(`npm run demo`)에는 이 설정이 없어 `not_configured`만 재현 가능한 것으로 코드상 확인했습니다(실제 데모 환경에서 직접 눌러보지는 않았습니다).
+- "조회 중 취소를 누르고 늦은 응답이 다시 나타나지 않는지"(안내문 스스로 확인 2번), "네트워크 탭에서 재조회 요청이 실제로 나가는지"(스스로 확인 3번), "package-lock.json의 실제 버전과 화면 버전 대조"(스스로 확인 4번)는 전부 브라우저 실행 없이 코드 조사로만 확인했습니다.
+- 20단계는 아직 공식 제출 전이라 AI 판정 결과가 없습니다.
+
+### 보완
+
+(기록 없음 — 아직 판정 피드백을 받지 않았습니다.)
+
+**다시 실행하는 방법:** `npm --prefix on-client run check`(구문 검사). 브라우저로 실제 조회 결과를 보려면 운영자 측 `ON_PROJECT_DIRECTORY`/`ON_APPROVED_PUBLIC_PACKAGES` 환경변수 설정이 먼저 필요합니다.

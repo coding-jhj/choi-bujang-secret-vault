@@ -1024,3 +1024,65 @@ npm --prefix on-client run check
 (기록 없음 — 아직 판정 피드백을 받지 않았습니다.)
 
 **다시 실행하는 방법:** `npm --prefix on-client run check`(구문 검사). 브라우저 확인은 `npm --prefix on-client run demo` 후 보안 기록에서 항목을 고르고 설명 요청(단, 실제 `ok` 상태는 운영자 권한 준비 전에는 재현 불가 — `event 없음`/`error` 상태만 재현 가능).
+
+---
+
+## 19단계: AI 조치 제안과 기존 서버 처리 결과 — renderAction 구현
+
+### 막은 공격
+
+서버의 "요청을 받았다(ACK, `pending`)"는 응답을 "실제로 조치가 적용됐다"로 착각하면, 공격이 아직 안 막혔는데 막힌 줄 알고 대응을 멈추는 사고가 날 수 있습니다. `renderActionSection`은 `status === 'succeeded'`여도 `observation.effectApplied === true`가 아니면 "결과 불명"으로 강등 표시합니다 — 서버가 보낸 `succeeded`라는 이름표를 그대로 믿지 않고, 실제 관측값(`effectApplied`)으로 다시 확인합니다. `denied`/`failed`의 `message`가 실제로는 빈 문자열로 올 수 있다는 걸 코드 조사로 확인했기 때문에, 빈 값일 때 "사유 정보가 제공되지 않았습니다"로 안전하게 대체해 빈 칸을 그대로 노출하지 않습니다. 확인 티켓(`confirmationId`)은 애초에 학생 함수 입력에 들어오지 않으므로(호스트가 분리해서 보관), 조치 버튼·실행 로직을 학생 코드에 만들 수 없는 구조이기도 합니다.
+
+### 무엇을 만들었나
+
+`renderActionSection({status, event, actionId, target, receipt, observation, message, confirmationExpiresAt, error})` 완성(커밋 범위: 이 함수만, 68줄):
+
+- `idle`/입력 없음 — "아직 미실행"
+- `prepared` — "준비됨·미실행(prepared)" + 확인 기한(없으면 "확인 불가")
+- `executing` — "서버에 전달 중(executing). 결과가 아직 없습니다."
+- `pending` — "서버 접수·처리 중(pending). 서버가 받았다는 것(ACK)은 효과가 아닙니다."
+- `succeeded` — `observation.effectApplied === true`일 때만 "효과 확인(succeeded)" + 관측 시각 + `effectApplied: true`. 아니면(또는 `observation` 자체가 없으면) "결과 불명(unknown)"으로 처리.
+- `denied`/`failed` — 라벨 + `message`(빈 문자열이면 "사유 정보가 제공되지 않았습니다"로 대체)
+- `unknown` — "결과 불명(unknown)" + 재조회 안내
+- `expired` — "확인 기한 지남(expired)" + 다시 준비 안내
+- `error` — "요청이 처리되지 않았습니다(error)" + `error.code`/`error.message`(없으면 "확인 불가")
+- 그 외 이상한 `status` 값 — "결과 불명(unknown). 알 수 없는 상태값입니다" (성공으로 단정하지 않고 안전 쪽으로 처리)
+- 공통(있는 것만, `idle` 제외 전부): `event.id`, `event.evidence`의 ID 목록(사건 전체 근거 — 조치별 근거는 입력 계약에 없음을 코드로 확인함), `actionId`, `target.id`/`generation`, `receipt.requestId`/`receiptId`/`version`
+- `data-student-action-event`(`event.id`), `data-student-action-request`(`receipt.requestId`) — `idle`이 아닌 모든 상태에서 해당 값이 있으면 독립적으로 부여(성공 여부와 무관 — "지금 이 요청에 묶여 있다"는 사실만 표시)
+- 버튼/클릭 핸들러 없음. 제공 화면의 실제 버튼("조치 준비", "대상과 조치를 확인했으며 집행합니다", "원천 결과만 재조회", "조치 화면 취소")을 학생 코드가 대체하지 않음.
+
+### 확인한 것 (실제로 실행한 결과)
+
+검증 기준 커밋: 이 커밋(작업 트리).
+
+1. 구문 검사:
+```
+npm --prefix on-client run check
+> node --check student/extension.mjs
+(오류 출력 없음 = 통과)
+```
+
+2. `renderAction`을 실제 모듈에서 Node로 직접 호출(최소 DOM 스텁, 코드 복사본 아님)해 18개 케이스를 실행했습니다. **구현한 에이전트가 1회, 검토한 제가 독립적으로 재실행 1회**, 동일한 결과를 확인했습니다:
+   - `succeeded` + `effectApplied: false` → "결과 불명"으로 강등됨(설계대로)
+   - `succeeded` + `observation` 자체 없음 → 마찬가지로 "결과 불명"
+   - `denied` + 빈 `message` → "사유 정보가 제공되지 않았습니다"로 안전 대체
+   - `error` + `code`/`message` 없음 → "확인 불가"로 안전 대체
+   - 이상한 `status`("weird") → 성공처럼 보이지 않고 "결과 불명(unknown)"으로 떨어짐
+   - `data-student-action-event`/`data-student-action-request`가 `event`/`receipt` 유무에 따라 **서로 독립적으로** 붙거나 안 붙음(한쪽만 있어도 그쪽만 붙음)을 확인
+   - `event.evidence`가 빈 배열이거나 배열이 아니면 "근거 ID" 줄 자체가 생략됨(방어 동작)
+   - 예외(크래시) 0건
+
+3. `git diff --stat`로 변경 범위가 `renderActionSection`과 `createStudentView`의 연결 한 줄로만 제한됨을 확인(68줄 추가/1줄 삭제).
+
+### 확인하지 못한 것
+
+- 실제 브라우저에서 "조치 준비" 버튼을 눌러보는 것은 하지 않았습니다. 조사 결과 지금 기록(`event.supportedActions`가 빈 배열)에는 조치 준비 버튼 자체가 안 뜨는 게 정상이라, 이 상태로는 `prepared`/`executing`/`pending`/`succeeded` 등을 브라우저에서 재현할 방법이 없습니다(운영자 측 연동 시스템 설정이 별도로 필요 — 과제 안내문에도 "학생이 집행기를 구축할 필요는 없다"고 명시됨).
+- "다시 불러오기나 다른 기록 선택 뒤 이전 조치 표시가 지워지는지"(안내문 스스로 확인 3번)는, 호스트(`app.js`)에 이미 있는 리셋/세대 카운터 로직을 코드로 확인했을 뿐 실제 브라우저에서 재현하지 않았습니다.
+- `prepared` 상태가 집행 실패 후 재조회로 다시 나타나는 엣지 케이스(코드 조사에서 발견함)는 실제로 재현해보지 않았습니다.
+- 19단계는 아직 공식 제출 전이라 AI 판정 결과가 없습니다.
+
+### 보완
+
+(기록 없음 — 아직 판정 피드백을 받지 않았습니다.)
+
+**다시 실행하는 방법:** `npm --prefix on-client run check`(구문 검사). 브라우저로 `prepared` 이후 상태를 보려면 운영자 측 연동 시스템(`--alekov-actions` 설정) 준비가 먼저 필요합니다.

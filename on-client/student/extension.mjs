@@ -572,6 +572,73 @@ function renderExplanationSection({ event, explanation, checkedAt } = {}) {
   return container;
 }
 
+// status가 'succeeded'여도 observation.effectApplied === true 가 아니면 '결과 불명'으로 처리한다
+// (서버의 succeeded 라벨을 그대로 믿지 않고 effectApplied 로 다시 확인한다). receipt/confirmationExpiresAt/
+// message 는 상태 전이 때 갱신되지 않고 남을 수 있어, 상태별 고정 문구를 우선 쓰고 receipt 필드는
+// "받은 범위에서" 참고 정보로만 나열한다. idle이 아닌 모든 상태에서 event.id/receipt.requestId가
+// 있으면 data-* 속성을 붙인다(성공 여부와 무관 — 지금 요청에 묶여 있다는 사실만 표시).
+function renderActionSection({ status, event, actionId, target, receipt, observation, message, confirmationExpiresAt, error } = {}) {
+  const container = document.createElement('div');
+
+  if (status == null || status === 'idle') {
+    container.appendChild(textEl('p', '아직 미실행'));
+    return container;
+  }
+
+  if (status === 'prepared') {
+    container.appendChild(textEl('p', '준비됨·미실행(prepared)'));
+    container.appendChild(textEl('p', `확인 기한: ${confirmationExpiresAt ?? '확인 불가'}`));
+  } else if (status === 'executing') {
+    container.appendChild(textEl('p', '서버에 전달 중(executing). 결과가 아직 없습니다.'));
+  } else if (status === 'pending') {
+    container.appendChild(textEl('p', '서버 접수·처리 중(pending). 서버가 받았다는 것(ACK)은 효과가 아닙니다.'));
+  } else if (status === 'succeeded') {
+    if (observation?.effectApplied === true) {
+      container.appendChild(textEl('p', '효과 확인(succeeded)'));
+      container.appendChild(textEl('p', `관측 시각: ${observation.observedAt ?? '확인 불가'}`));
+      container.appendChild(textEl('p', 'effectApplied: true'));
+    } else {
+      container.appendChild(textEl('p', '결과 불명(unknown). 효과가 확인되지 않았습니다 — 성공으로 판단하지 말고 결과를 다시 조회하세요.'));
+    }
+  } else if (status === 'denied' || status === 'failed') {
+    container.appendChild(textEl('p', status === 'denied' ? '거절(denied)' : '실패(failed)'));
+    container.appendChild(textEl('p', message ? message : '사유 정보가 제공되지 않았습니다.'));
+  } else if (status === 'unknown') {
+    container.appendChild(textEl('p', '결과 불명(unknown). 효과 없음으로도 성공으로도 판단하지 말고, 결과를 다시 조회하세요.'));
+  } else if (status === 'expired') {
+    container.appendChild(textEl('p', '확인 기한 지남(expired). 다시 준비하세요.'));
+  } else if (status === 'error') {
+    container.appendChild(textEl('p', '요청이 처리되지 않았습니다(error).'));
+    container.appendChild(textEl('p', `오류 코드: ${error?.code ?? '확인 불가'}`));
+    container.appendChild(textEl('p', `오류 메시지: ${error?.message ?? '확인 불가'}`));
+  } else {
+    container.appendChild(textEl('p', '결과 불명(unknown). 알 수 없는 상태값입니다 — 결과를 다시 조회하세요.'));
+  }
+
+  if (event?.id != null) container.appendChild(textEl('p', `사건 ID: ${event.id}`));
+
+  const evidenceIds = Array.isArray(event?.evidence)
+    ? event.evidence.map((item) => item?.id).filter((id) => id != null)
+    : [];
+  if (evidenceIds.length > 0) container.appendChild(textEl('p', `근거 ID: ${evidenceIds.join(', ')}`));
+
+  if (actionId != null) container.appendChild(textEl('p', `조치: ${actionId}`));
+
+  if (target?.id != null) {
+    const generationText = target.generation != null ? ` (세대 ${target.generation})` : '';
+    container.appendChild(textEl('p', `대상: ${target.id}${generationText}`));
+  }
+
+  if (receipt?.requestId != null) container.appendChild(textEl('p', `요청 ID: ${receipt.requestId}`));
+  if (receipt?.receiptId != null) container.appendChild(textEl('p', `접수 ID: ${receipt.receiptId}`));
+  if (receipt?.version != null) container.appendChild(textEl('p', `버전: ${receipt.version}`));
+
+  if (event?.id != null) container.setAttribute('data-student-action-event', event.id);
+  if (receipt?.requestId != null) container.setAttribute('data-student-action-request', receipt.requestId);
+
+  return container;
+}
+
 export function createStudentView({ onChange } = {}) {
   return {
     renderIdentity(input) { return renderIdentitySection(input); },
@@ -581,6 +648,6 @@ export function createStudentView({ onChange } = {}) {
     renderVulnerabilities() { return '학생 구현 대기: 정확한 설치 버전·OSV 출처·조회 시각·부분 결과·조회 실패를 구분하세요.'; },
     renderAiConnection(input) { return renderAiConnectionSection(input ?? {}); },
     renderExplanation(input) { return renderExplanationSection(input ?? {}); },
-    renderAction() { return '학생 구현 대기: 현재 사건·조치·실제 대상·사람 확인·ACK와 원천 효과·unknown을 구분하세요.'; },
+    renderAction(input) { return renderActionSection(input ?? {}); },
   };
 }

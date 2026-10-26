@@ -1140,3 +1140,38 @@ npm --prefix on-client run check
 (기록 없음 — 아직 판정 피드백을 받지 않았습니다.)
 
 **다시 실행하는 방법:** `npm --prefix on-client run check`(구문 검사). 브라우저로 실제 조회 결과를 보려면 운영자 측 `ON_PROJECT_DIRECTORY`/`ON_APPROVED_PUBLIC_PACKAGES` 환경변수 설정이 먼저 필요합니다.
+
+---
+
+## 21단계: 다른 사람이 이해할 수 있는 문서 — STUDENT_RUNBOOK.md 작성 및 README 보강
+
+### 막은 공격
+
+판정 AI가 이번 단계는 코드를 실행하지 않고 "문서 내용과 실제 코드가 맞는지"만 대조합니다. 문서에 추측·과장이 섞이면 바로 불일치로 드러납니다. `on-client/docs/STUDENT_RUNBOOK.md` 작성 전, `.on-starter-manifest.json`의 56개 파일 해시를 작업 트리와 실제로 대조해 "학생이 수정한 파일은 `student/extension.mjs` 하나뿐"이라는 걸 확인하고 적었습니다(추측 아님). 실행 명령·시작 메시지·포트 검증 로직(`Host` 헤더 검사 등)도 전부 코드 줄 번호 근거와 함께 적었고, 포트 충돌·버전 범위 밖 같은 시나리오는 "코드로만 확인, 실행 안 함"이라고 명시해 "확인했다고 적었지만 실제로는 안 한 것"이 되지 않게 했습니다. 기존 문서(`CONNECTION_TROUBLESHOOT.md`)에 빠져 있던 실제 오류 코드(`HOST_REJECTED`/`QUERY_REJECTED`/`ORIGIN_REJECTED`)도 코드 조사로 발견해 추가했습니다.
+
+### 무엇을 만들었나
+
+- **신규 작성**: `on-client/docs/STUDENT_RUNBOOK.md` — 필요 프로그램·확인 버전, 폴더 구조, 실행 명령·브라우저 주소·시작 신호·종료, Mermaid+글로 된 구성도(브라우저→로컬 서버→접근 제어·XDR/AI 게이트웨이), 13~20단계 구현 함수 표, 장애 상황 6가지와 확인·복구 방법 표, "확인 못 한 것" 섹션.
+- **보강**: `on-client/README.md`에 "기능"/"구성"/"지원 환경" 섹션 추가(기존 내용은 그대로 보존, 삭제·덮어쓰기 없음).
+- 제공 문서(`GETTING_STARTED_STUDENT.md`, `STUDENT_LAUNCH_GUIDE.md` 등)는 전혀 건드리지 않음.
+- 코드 변경 없음(이번 단계는 `student/extension.mjs`를 손대지 않음).
+
+### 확인한 것 (실제로 실행한 결과)
+
+1. `.on-starter-manifest.json`의 `sourceHashes`(56개)를 작업 트리 파일의 SHA-256과 전부 대조(실행함): 55개 일치, 1개(`student/extension.mjs`)만 불일치 — "학생이 수정한 유일한 파일" 주장의 근거.
+2. `node -v` / `npm -v` / `git --version` / `npm --prefix on-client run check`를 저장소 루트와 `on-client` 폴더 양쪽에서 각각 실제 실행(원문 출력을 문서에 그대로 인용).
+3. `npm run demo` 실행 후 콘솔 메시지("케셰브 예제: http://127.0.0.1:5189")와 브라우저 접속은 17~18단계 작업 중 이 세션에서 이미 실제로 확인한 내용을 근거로 인용(재실행하지 않음, 이전 확인을 재사용).
+4. 비밀값 노출 여부를 `git diff`로 직접 스캔(`sk-`/`secret`/`password`/`api_key`/`bearer`/`token=` 패턴) — 일치 항목 없음.
+
+### 확인하지 못한 것
+
+- 포트 충돌, Node 버전 범위 밖, 20초 타임아웃 시나리오는 코드를 읽고 적었을 뿐 실제로 재현하지 않았습니다.
+- `Ctrl+C` 종료 시 실제 터미널 출력은 실행해보지 않았습니다("정리 로직이 호출 안 됨"은 코드 확인).
+- `tools/start-alekov.ps1`을 이 세션에서 직접 실행하지 않았습니다(사용자 PC에서 실행해야 하는 스크립트).
+- 21단계는 아직 공식 제출 전이라 AI 판정 결과가 없습니다.
+
+### 보완
+
+(기록 없음 — 아직 판정 피드백을 받지 않았습니다.)
+
+**다시 실행하는 방법:** `npm --prefix on-client run check`. 문서 내용 검증은 `node -v`/`npm -v`/`git --version`을 직접 실행해 `docs/STUDENT_RUNBOOK.md`의 1절과 비교.

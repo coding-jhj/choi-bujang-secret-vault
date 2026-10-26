@@ -488,21 +488,87 @@ function renderAiConnectionSection({ status, mode, data, error, checkedAt } = {}
   return container;
 }
 
-// AI 설명 성공 여부는 바깥 컨테이너의 data-student-explanation-event 속성만으로 구분한다.
-// status 가 ok 라도 data 나 event.id 가 없는 비정상 응답은 실패와 같게 처리해 속성을 붙이지 않는다.
-function renderExplanationSection({ event, explanation } = {}) {
+const EXPLANATION_STATE_LABEL = { access: '접속', session: '세션', device: '기기' };
+
+// 성공 판정은 오직 바깥 container 의 data-student-explanation-event 속성만으로 구분한다.
+// 근거 ID 가 하나라도 현재 선택된 event.evidence 와 맞지 않으면(다른 기록·지어낸 근거) 성공 화면 대신
+// 전체 실패로 처리한다. status 가 예상 밖 값이면 기록을 먼저 고르라는 안내로 안전하게 처리한다.
+function renderExplanationSection({ event, explanation, checkedAt } = {}) {
   const container = document.createElement('div');
 
-  if (explanation?.status === 'ok' && explanation.data != null && event?.id != null) {
-    container.setAttribute('data-student-explanation-event', event.id);
-    container.appendChild(textEl('p', `사건 ID: ${event.id}`));
-    container.appendChild(textEl('p', explanation.data.summary ?? '없음'));
-  } else {
-    container.appendChild(textEl('p', `오류 코드: ${explanation?.error?.code ?? '확인 불가'}`));
-    container.appendChild(textEl('p', `오류 메시지: ${explanation?.error?.message ?? '확인 불가'}`));
+  if (explanation?.status === 'error') {
+    container.appendChild(textEl('p', `AI 설명 실패: ${explanation.error?.message ?? '확인 불가'}`));
+    container.appendChild(textEl('p', `오류 코드: ${explanation.error?.code ?? '확인 불가'}`));
     container.appendChild(textEl('p', '기록은 그대로입니다.'));
+    return container;
   }
 
+  if (event?.id == null) {
+    container.appendChild(textEl('p', '보안 기록에서 기록을 먼저 고르세요.'));
+    return container;
+  }
+
+  if (explanation?.status === 'loading') {
+    container.appendChild(textEl('p', '설명 요청 중'));
+    return container;
+  }
+
+  if (explanation?.status === 'ok' && explanation.data != null) {
+    const evidence = Array.isArray(event.evidence) ? event.evidence : [];
+    const evidenceIds = Array.isArray(explanation.data.evidenceIds) ? explanation.data.evidenceIds : [];
+    const matchedEvidence = evidenceIds.map((id) => ({ id, item: evidence.find((entry) => entry?.id === id) }));
+
+    if (matchedEvidence.length === 0 || matchedEvidence.some((match) => match.item == null)) {
+      container.appendChild(textEl('p', '이 설명은 사용할 수 없습니다 — 근거가 현재 기록과 맞지 않습니다.'));
+      if (explanation.error?.code) {
+        container.appendChild(textEl('p', `오류 코드: ${explanation.error.code}`));
+      }
+      return container;
+    }
+
+    container.setAttribute('data-student-explanation-event', event.id);
+    container.appendChild(textEl('p', `사건 ID: ${event.id}`));
+    container.appendChild(textEl('h4', 'AI 설명(참고용)'));
+    container.appendChild(textEl('p', explanation.data.summary));
+
+    for (const { id, item } of matchedEvidence) {
+      container.appendChild(textEl('p', `${id} — ${item.text}`));
+    }
+
+    const rules = Array.isArray(event.rules) ? event.rules : [];
+    for (const rule of rules) {
+      container.appendChild(textEl('p', `${rule?.id} — ${rule?.text}`));
+    }
+
+    const state = event.state ?? {};
+    const unknownKeys = ['access', 'session', 'device'].filter((key) => state[key] === 'unknown');
+    if (unknownKeys.length === 0) {
+      container.appendChild(textEl('p', '없음'));
+    } else {
+      for (const key of unknownKeys) {
+        container.appendChild(textEl('p', `${EXPLANATION_STATE_LABEL[key]}: 확인 불가(unknown)`));
+      }
+    }
+
+    const proposals = Array.isArray(explanation.data.proposals) ? explanation.data.proposals : [];
+    if (proposals.length === 0) {
+      const supportedActions = Array.isArray(event.supportedActions) ? event.supportedActions : [];
+      if (supportedActions.length === 0) {
+        container.appendChild(textEl('p', '원천이 지원하는 조치가 없어 제안이 없습니다(정상).'));
+      } else {
+        container.appendChild(textEl('p', 'AI가 제안한 조치가 없습니다.'));
+      }
+    } else {
+      for (const proposal of proposals) {
+        container.appendChild(textEl('p', `제안: ${proposal?.action} — ${proposal?.reason}`));
+        container.appendChild(textEl('p', '사람 확인이 필요하며 실행되지 않았습니다.'));
+      }
+    }
+
+    return container;
+  }
+
+  container.appendChild(textEl('p', '보안 기록에서 기록을 먼저 고르세요.'));
   return container;
 }
 

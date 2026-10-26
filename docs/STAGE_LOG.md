@@ -969,3 +969,58 @@ npm --prefix on-client run check
 (기록 없음 — 아직 판정 피드백을 받지 않았습니다.)
 
 **다시 실행하는 방법:** `npm --prefix on-client run check`(구문 검사), `npm --prefix on-client run demo`(브라우저로 idle/error 상태 확인 — 보호 현황 화면의 「AI 연결 점검」 버튼).
+
+---
+
+## 18단계: 근거가 있는 AI 사건 설명 — renderExplanation 완성
+
+### 막은 공격
+
+AI 요약이 실제로는 현재 선택된 기록의 근거가 아닌 근거(다른 기록 것, 또는 존재하지 않는 ID)를 인용했는데도 그대로 "성공한 설명"처럼 보여주면, 사용자가 근거 없는 AI 주장을 믿게 됩니다. `renderExplanationSection`은 `explanation.data.evidenceIds`의 모든 ID를 현재 `event.evidence`와 직접 대조하고, **단 하나라도 못 찾으면 설명 전체를 "사용할 수 없음"으로 처리**합니다(일부만 맞다고 부분적으로 보여주지 않음 — 근거 하나가 틀리면 그 설명 전체의 신뢰성을 보장할 수 없기 때문). 이 재대조는 호스트(`app.js`)가 이미 하는 검사와 별개로 학생 코드가 한 번 더 직접 수행하는 것으로, 호스트 흐름을 거치지 않고 학생 함수가 직접 호출되는 경우(판정 도구의 무작위 입력 테스트 등)까지 방어합니다. `event.state`(access/session/device)가 `unknown`인 항목은 "확인 불가(unknown)"로만 표시하고 안전·정상으로 둔갑시키지 않습니다. `proposals`는 항상 "사람 확인이 필요하며 실행되지 않았습니다"를 덧붙여, AI 제안이 자동 실행되는 것처럼 보이지 않게 합니다.
+
+### 무엇을 만들었나
+
+`renderExplanationSection({ event, explanation, checkedAt })`을 다음 우선순위로 완성(커밋 범위: 이 함수와 `EXPLANATION_STATE_LABEL` 상수만):
+
+1. `explanation.status === 'error'` — `event`가 `null`이어도 이게 최우선. "AI 설명 실패: {message}" + "오류 코드: {code}" + "기록은 그대로입니다."
+2. `event?.id == null` — "보안 기록에서 기록을 먼저 고르세요."
+3. `explanation.status === 'loading'` — "설명 요청 중"
+4. `explanation.status === 'ok' && explanation.data`:
+   - 근거 ID 전체 대조. 하나라도 `event.evidence`에 없으면(또는 `evidenceIds`가 비었으면) 전체 실패: "이 설명은 사용할 수 없습니다 — 근거가 현재 기록과 맞지 않습니다." (+ `error.code`가 있으면 같이 표시), `data-student-explanation-event` 속성 안 붙임.
+   - 전부 맞으면 성공: `data-student-explanation-event = event.id` 부여 + 사건 ID + "AI 설명(참고용)" + `summary` + 근거(ID—글) + 규칙(ID—글) + `state`의 `unknown` 항목만 나열(없으면 "없음") + `proposals`(없으면 `supportedActions` 비었는지에 따라 "원천 미지원(정상)" 또는 "AI가 제안한 조치 없음"; 있으면 각각 action+reason+"사람 확인 필요, 미실행").
+5. 그 외(이상한 `status` 값 등) — 2번과 동일하게 방어적으로 "먼저 고르세요" 처리.
+
+### 확인한 것 (실제로 실행한 결과)
+
+검증 기준 커밋: 이 커밋(작업 트리).
+
+1. 구문 검사:
+```
+npm --prefix on-client run check
+> node --check student/extension.mjs
+(오류 출력 없음 = 통과)
+```
+
+2. `renderExplanation`을 실제 모듈에서 Node로 직접 호출(최소 DOM 스텁, 코드 복사본 아님)해 18개 케이스를 실행했습니다. **이 검증은 두 번(구현한 에이전트가 1회, 검토한 제가 독립적으로 재실행 1회) 수행했고 둘 다 동일한 결과**였습니다. 확인된 것:
+   - 분기 우선순위(error 최우선 → event 없음 → loading → ok/근거대조 → 방어) 전부 설계대로 동작
+   - `data-student-explanation-event` 속성이 **성공 5건에서만** 붙고, 나머지 13건(error 3종, event 없음 2종, loading, 근거 불일치/빈배열/비배열 4종, 이상한 status 3종)에서는 전혀 안 붙음
+   - 근거 ID가 하나라도 안 맞으면(`ev-999`처럼 존재하지 않는 ID가 섞인 경우 포함) 맞는 근거까지 포함해 **전체**가 "사용할 수 없음"으로 처리됨(부분 표시 안 함)을 실제로 확인
+   - `state`가 전부 `unknown`이 아니면 "없음" 표시, 일부만 `unknown`이면 해당 항목만 나열됨을 확인
+   - `proposals` 유무 × `supportedActions` 유무 조합 3가지(제안 있음 / 제안 없음+미지원 정상 / 제안 없음+지원하는데 제안 없음) 전부 올바른 문구로 구분됨을 확인
+   - `event.rules`가 `null`인 비정상 입력에도 예외 없이 방어됨을 확인
+   - 예외(크래시) 0건
+
+3. `git diff --stat`로 변경 범위가 `renderExplanationSection`/`EXPLANATION_STATE_LABEL`로만 제한됨을 확인.
+
+### 확인하지 못한 것
+
+- 실제 브라우저에서 보안 기록을 선택하고 "AI 설명 요청" 버튼을 눌러보는 것은 이번 세션에서 하지 않았습니다. 17단계와 마찬가지로 실제 AI 연결(`ok` 상태)은 운영자 측 계정·앱 권한 준비가 끝나야 재현됩니다.
+- "서로 다른 기록 두 개로 설명을 받아 근거·규칙이 맞는지" 확인(안내문의 스스로 확인 1번)은 Node 실행 검증으로 간접 확인했으나(서로 다른 `event`/`evidenceIds` 조합으로 테스트), 실제 화면에서 기록 두 개를 번갈아 눌러보는 것은 하지 않았습니다.
+- "설명 요청 중 다른 기록을 고르면 늦게 온 설명이 엉뚱한 기록에 안 붙는지"(안내문 스스로 확인 3번)는 호스트(`app.js`)의 세대 카운터 로직으로 이미 보장되는 것을 코드로 확인했을 뿐, 실제 브라우저에서 빠르게 기록을 바꿔가며 레이스 컨디션을 재현해보지는 않았습니다.
+- 18단계는 아직 공식 제출 전이라 AI 판정 결과가 없습니다.
+
+### 보완
+
+(기록 없음 — 아직 판정 피드백을 받지 않았습니다.)
+
+**다시 실행하는 방법:** `npm --prefix on-client run check`(구문 검사). 브라우저 확인은 `npm --prefix on-client run demo` 후 보안 기록에서 항목을 고르고 설명 요청(단, 실제 `ok` 상태는 운영자 권한 준비 전에는 재현 불가 — `event 없음`/`error` 상태만 재현 가능).

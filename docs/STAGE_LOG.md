@@ -757,3 +757,215 @@ node --test test/campaign-retest.test.mjs → 2개 모두 통과
 1. 이 템플릿 그대로 이 파일 맨 아래에 새 `## N단계` 섹션 추가
 2. `README.md`의 "방어한 공격 유형" 표에 한 줄 추가 + "현재 N단계까지" 문구 갱신
 3. (필요하면) README.md의 기술 스택·아키텍처 설명 중 이번 단계에서 바뀐 부분만 손봄
+
+---
+
+## 13단계: renderIdentity 구현 — 로그인 사용자·기기·세션 상태 표시
+
+### 막은 공격
+
+로그인 사용자·기기·세션 조회가 실패(`error`)했거나 아직 안 왔을(`loading`) 때 화면이 "정상"처럼 보이면, 보안 기준을 충족하지 못한 기기나 만료·철회된 세션이 사용자 눈에 안전한 것처럼 보이는 "위장된 정상 상태" 문제가 생길 수 있습니다. `renderIdentitySection`은 `loading`/`error`/`ok`를 분리하고, 기기·세션이 `noncompliant`·`expired`·`revoked` 등 비정상 상태일 때 "(주의 필요)" 문구를 붙여 숨기지 않습니다. 판정 라벨 조회에 `Object.hasOwn`(`labelOf`, 15–17행)을 써서, `constructor`처럼 객체 프로토타입에 있는 키가 등록된 정상 코드처럼 표시되는 것도 막습니다. 이 단계는 **막는 공격의 식별이 아니라 숨겨진 위험 상태를 노출하는 쪽**입니다 — 공격 자체를 차단하지는 않습니다.
+
+### 무엇을 만들었나
+
+- `student/extension.mjs`의 `renderIdentity`만 구현(나머지 7개 함수는 시작 틀 기본 문구 유지). 커밋 `f738fe8`.
+- 입력 `{ me, devices, sessions }`, 각 `{status, mode, data?, error?}`. "사용자: {label} (ID: {id})", "현재 기기: {label} (ID: {id}) — {기기 상태}{ (주의 필요)}", "현재 세션: {id} — {세션 상태}{ (주의 필요)}" 형식.
+- 1차 구현(`f738fe8`) 뒤 **14단계를 13단계 판정 통과 전에 먼저 진행한 실수**가 있어, 그 14단계 커밋(`f75c85b`)을 `c8aa877`로 되돌렸습니다. 이후 시작 틀 제공 파일 줄바꿈을 원본과 맞추는 작업(`2d80f60`, 코드 변경 없음, EOL/`.env.example`만)을 거쳐,
+- **13단계 보완**(`dd73336`): 판정 피드백(`student-identity-updates` 실패 항목) 반영. `renderIdentity`를 `renderIdentitySection({ me, devices, sessions })`로 확장하고, `renderMeSection`/`renderDevicesSection`/`renderSessionsSection`과 공통 헬퍼 `labelOf`/`appendResourceState`를 신설. 기기·세션 상태에 한국어 설명과 원래 코드값을 함께 표시("보안 기준 미충족(noncompliant)", "만료(expired)" 등)하고, 사용자·기기·세션 ID를 추가로 표시.
+
+### 확인한 것 (실제로 실행한 결과)
+
+검증 기준 커밋: `d28cf94`(HEAD, 13~16단계가 모두 반영된 상태).
+
+```
+npm --prefix on-client run check
+> node --check student/extension.mjs
+EXIT=0
+```
+
+- 위 명령은 **구문 검사만** 합니다. `renderIdentitySection`의 `loading`/`error`/`ok` 분기와 `labelOf`의 `Object.hasOwn` 처리는 커밋 diff를 코드로 직접 대조해 구조를 확인했으며, 이번 세션에서 브라우저로 실제 렌더링을 실행해 확인하지는 않았습니다.
+- `f738fe8` 커밋 메시지는 "데모 모드 실행으로 ok/error 두 경로 모두 실제 화면에서 확인함"이라고 적혀 있으나, 이는 그 작업 당시의 주장이며 이번 세션에서 재현·재검증한 증거가 아닙니다.
+
+### 확인하지 못한 것
+
+- `renderIdentitySection`을 실제 브라우저(데모 모드 또는 배포 환경)에서 렌더링해 보지 않았습니다. 재현 방법: `npm --prefix on-client start`(또는 `npm --prefix on-client run demo`) 후 보호 현황 화면에서 기기·세션 상태 확인.
+- 13단계 판정(AI)이 어떤 기준으로 `student-identity-updates`를 실패 처리했는지 원문 피드백은 저장소에 없습니다. `dd73336` 커밋 메시지의 요약만 남아 있습니다.
+- 통과 여부(100/100 등) 기록이 `docs/STAGE_LOG.md`·`README.md`에 없습니다.
+
+### 보완
+
+1. **(`dd73336`) 판정 피드백 대응** — `student-identity-updates` 실패 항목에 맞춰, me뿐 아니라 devices·sessions 각각의 loading·ok·error를 구역별로 처리하고 원래 상태 코드·기기·세션 ID를 추가 표시.
+
+---
+
+## 14단계: renderDecision 구현 — 업무 앱 접속 판정 표시
+
+### 막은 공격
+
+판정 결과가 `unknown`이거나 목록에 없는 값일 때, 또는 조회 자체가 실패(`error`)했을 때 이를 "허용"처럼 보여주면 **fail-open**(실패를 허용으로 오인) 위험이 생깁니다. `renderDecisionSection`은 `allow`/`deny`/`challenge` 외의 값과 `unknown`을 전부 "확인 불가(unknown) — 허용되지 않음"으로 통일하고, 요청 실패(`error`)는 "이것은 접근 거부 판정이 아닙니다"라는 안내와 함께 별도로 보여줘 **거부 판정과 조회 실패를 혼동하지 않도록** 구분합니다. 판정 값 조회를 `Object.hasOwn`으로 제한해, `constructor` 같은 프로토타입 키가 정상 판정처럼 표시되는 것도 막습니다.
+
+### 무엇을 만들었나
+
+- 1차 구현 `f75c85b`: `DECISION_LABEL`과 `renderDecisionSection` 신설. **13단계가 판정 통과하기 전에 진행한 순서 실수**로 `c8aa877`에서 되돌림.
+- 2차 구현(재시도) `6272cbf`: `idle`/`loading`/`error`/`ok`를 구분하고, `allow`·`deny`·`challenge`·목록 밖 값·`unknown`을 모두 "접근 허용(allow)"/"접근 거부(deny)"/"추가 확인 필요(challenge)"/"확인 불가(unknown) — 허용되지 않음" 형식으로 한국어 뜻과 원래 코드값을 함께 표시. `error`는 "요청 실패: …" + "이것은 접근 거부 판정이 아닙니다" 안내를 덧붙임.
+
+### 확인한 것 (실제로 실행한 결과)
+
+검증 기준 커밋: `d28cf94`(HEAD).
+
+```
+npm --prefix on-client run check
+> node --check student/extension.mjs
+EXIT=0
+```
+
+- `renderDecisionSection`의 분기(`idle`/`loading`/`error`/`ok`/그 외 unknown)는 커밋 diff로 코드 구조를 확인했습니다. 실제 브라우저에서 각 상태를 렌더링해 확인하지는 않았습니다.
+- `git diff --quiet f738fe8 c8aa877 -- student/extension.mjs`가 종료 코드 0을 반환해, 되돌린 뒤 13단계 상태와 완전히 같아졌음을 코드 수준에서 확인했습니다(이번 세션에서 재실행한 것이 아니라, 이전 조사 단계에서 실행한 결과를 근거로 함 — 직접 재실행은 하지 않았습니다).
+
+### 확인하지 못한 것
+
+- `allow`/`deny`/`challenge`/`unknown`/`error` 5가지 상태를 실제 화면에서 렌더링해 확인하지 않았습니다.
+- 14단계 판정(AI) 결과와 `server-decisions-distinct`, `unknown-not-allow`, `failure-not-allow` 등 확인 항목의 실제 판정 결과는 저장소에 없습니다.
+
+### 보완
+
+1. **(`c8aa877`) 순서 보완** — 13단계 판정 통과 전에 14단계를 진행한 것을 되돌리고, 13단계 보완 완료 후 다시 구현(`6272cbf`)하는 순서로 바꿈. 코드 내용 자체의 결함 때문이 아니라 제출 순서 문제였습니다.
+
+---
+
+## 15단계: renderEvents 구현 — 접속 기록·XDR 경보 목록과 상세 보기
+
+### 막은 공격
+
+접속 기록(`kind: access`)과 XDR 경보(`kind: xdr`)를 다시 정렬·필터링할 때 **원본 배열을 변경하면** 다른 화면이 참조하는 데이터가 같이 바뀌는 사고가 날 수 있습니다. `renderEventsSection`은 `[...data].sort(...)`로 복사본만 정렬하고, 종류·업무 앱·접속 상태 3가지 필터도 서버가 이미 내려준 배열 "안에서만" 적용합니다 — 즉 클라이언트가 서버 응답 범위를 벗어난 데이터를 요청하거나 조립하지 않습니다. `CONTRACT_MISMATCH`·`ENGINE_RESULT_UNVERIFIED` 코드는 전용 문구로 구분해, 검증되지 않은 엔진 결과가 정상 기록처럼 보이지 않도록 합니다. 데이터 신호(서명)가 바뀌면 이전 상세 선택을 초기화해, 새로고침 뒤 옛 기록의 상세 화면이 새 기록인 것처럼 남아 있는 것도 막습니다.
+
+### 무엇을 만들었나
+
+- 커밋 `d8d2791`. `renderEventsSection`(필터 3종, 시각 내림차순 정렬, 행마다 `data-student-event-id`)과 `renderEventDetail`(근거·규칙·접속/세션/기기 3상태, `data-student-event-detail`) 신설.
+- 필터 결과 0건과 조회 실패(`error`/`unknown`)를 다른 문구로 구분("선택한 조건에 맞는 기록이 없습니다" vs "기록: 확인 불가(unknown)").
+- `createStudentView({ onChange })`가 필터·상세 선택 변경 시 호스트(`on-client/public/app.js`)에 다시 그리기를 요청하도록 연결.
+
+### 확인한 것 (실제로 실행한 결과)
+
+검증 기준 커밋: `d28cf94`(HEAD).
+
+```
+npm --prefix on-client run check
+> node --check student/extension.mjs
+EXIT=0
+```
+
+- `[...data].sort(...)`로 원본 배열이 바뀌지 않는 구조, 필터가 받은 배열 안에서만 동작하는 구조, 데이터 ID 목록이 바뀌면 상세 선택을 초기화하는 분기는 코드 diff로 확인했습니다. 실제 화면에서 필터를 조작하거나 상세 버튼을 눌러보는 동작은 이번 세션에서 실행하지 않았습니다.
+- 호스트(`on-client/public/app.js:1254`)가 `onChange: () => renderAllStudent()`를 넘기는 연결은 코드로 확인했습니다.
+
+### 확인하지 못한 것
+
+- 필터 조합, 정렬, 상세 보기 버튼의 실제 클릭 동작을 브라우저에서 확인하지 않았습니다.
+- `event_filter`, `event_detail`, `events-refresh-replaces`, `events-empty-error-distinct` 등 확인 항목의 실제 판정 결과는 저장소에 없습니다.
+
+### 보완
+
+(기록 없음 — 이 단계에 대한 판정 피드백이 저장소에 없습니다.)
+
+---
+
+## 16단계: renderStatus 구현 — 알림·기기·세션·진단정보·미지원 조치 안내
+
+### 막은 공격
+
+진단 정보는 원래 임의의 필드를 담을 수 있는 자료입니다. 사용자가 "도움정보 복사" 버튼을 누를 때 진단 정보 전체를 그대로 복사하면 민감한 내부 값이 의도치 않게 클립보드·공유 화면에 노출될 수 있습니다. `renderStatusSection`은 `requestId`·`component`·`version`·`checkedAt`·`engine.mode`·`engine.code` **6개 필드만 허용 목록(allowlist) 방식**으로 뽑아 표시하고, 그 안전한 값만 클립보드에 복사합니다(다른 필드는 절대 포함하지 않음) — 이건 CLAUDE.md의 비밀값 노출 금지 원칙을 구현 수준에서 지키는 장치입니다. 또한 기록에 `supportedActions`가 있을 때 붙이는 "<action> 미지원" 버튼은 클릭 핸들러 없이 `disabled`로 고정해, **지원하지 않는 조치 요청이 실제로 서버에 전송되는 일을 막습니다**.
+
+### 무엇을 만들었나
+
+- 커밋 `d28cf94`. 기기·세션은 13단계의 `renderDevicesSection`·`renderSessionsSection`을 재사용해 불러오는 중/빈 목록/실패를 구분 표시.
+- `notifications` 배열 항목마다 `resource`·`code`·`message` 표시, 비어 있으면 "주의할 알림이 없습니다".
+- 진단 정보 6개 필드 허용 목록(`DIAGNOSTICS_TOP_FIELDS`)과 "도움정보 복사" 버튼(클릭 시에만 `navigator.clipboard.writeText`로 그 안전한 값만 복사).
+- 15단계 `renderEventDetail`을 확장해 `supportedActions`가 있을 때만 "<action> 미지원" 비활성 버튼 추가.
+
+### 확인한 것 (실제로 실행한 결과)
+
+검증 기준 커밋: `d28cf94`(HEAD).
+
+```
+npm --prefix on-client run check
+> node --check student/extension.mjs
+EXIT=0
+```
+
+- 진단 정보 허용 목록 6개 필드, "도움정보 복사" 버튼이 클릭 시에만 동작하는 구조, 미지원 조치 버튼에 클릭 핸들러가 없는 구조는 코드 diff로 확인했습니다.
+- 실제로 클립보드에 복사되는 값, 브라우저에서 미지원 버튼을 눌렀을 때 요청이 전송되지 않는지는 이번 세션에서 실행해 확인하지 않았습니다.
+
+### 확인하지 못한 것
+
+- "도움정보 복사" 버튼의 실제 클립보드 동작과 그 내용.
+- `devices-sessions-refresh`, `notifications`, `loading_empty`, `retry`, `diagnostics_redaction`, `unsupported_action` 등 확인 항목의 실제 판정 결과는 저장소에 없습니다.
+
+### 보완
+
+(기록 없음 — 이 단계에 대한 판정 피드백이 저장소에 없습니다.)
+
+---
+
+**13~16단계 공통으로 확인하지 못한 것:**
+
+- 이 네 단계는 모두 `student/extension.mjs`의 구문 검사(`node --check`, `npm --prefix on-client run check`)만 이번 세션에서 실행했습니다. on-client에는 별도의 자동 테스트 스크립트(`node --test` 등)가 없고, `npm --prefix on-client run check`은 구문 검사만 합니다. 각 단계의 render 함수가 실제로 올바르게 동작하는지는 브라우저 또는 데모 모드(`npm --prefix on-client run demo`)로 직접 확인해야 합니다.
+- `test:auth`/`test:notes`/`test:devices`/`test:cookie`(루트 `npm run` 스크립트)는 `node_modules`가 설치되지 않아 `ERR_MODULE_NOT_FOUND`(`@supabase/supabase-js`)로 실패했습니다. `npm ci` 설치 뒤 재확인이 필요합니다. 이 네 스크립트는 `student/extension.mjs`가 아니라 `src/*-api.mjs`를 테스트하므로 13~16단계 자체와는 직접 관련이 없습니다.
+- 13~16단계 각각의 AI 판정 결과(통과/보완 요구 항목별 세부 내용)는 `docs/STAGE_LOG.md`·`README.md`에 기록되어 있지 않습니다. 이번 기록은 **커밋 이력과 코드 diff를 근거로 사후 작성**한 것이며, 당시 판정 화면이나 피드백 원문을 재구성한 것이 아닙니다.
+
+**다시 실행하는 방법:** `npm --prefix on-client run check`(구문 검사), `npm --prefix on-client run demo`(실제 화면 확인, 이번 세션에서는 실행하지 않음).
+
+---
+
+## 17단계: AI 연결 점검 결과와 사건 설명 실행 구분 — renderAiConnection·renderExplanation 구현
+
+### 막은 공격
+
+모델 목록 조회(연결 테스트) 성공을 실제 사건 설명이 실행된 것처럼 보여주면, 사용자가 "AI가 이미 보안 사건을 분석했다"고 오인할 수 있습니다(판정 정확성 위장). `renderAiConnection`의 `ok` 화면에는 항상 "사건 설명은 아직 실행하지 않았습니다" 고정 문구를 넣어 연결 점검과 사건 설명 실행을 구분합니다. `error.code` 원문(영문 코드 21개, `on-client/public/app.js:160-180`의 `AI_MESSAGES`)을 그대로 노출하는 대신 8개 안전 분류로 매핑한 안내 문구를 함께 보여줘, 목록 밖 코드가 와도 항상 안내가 비지 않도록 합니다. `renderExplanation`은 `data-student-explanation-event` 속성을 **실제 성공(ok && data && event.id 모두 존재)한 경우에만** 붙여, 실패나 비정상 응답이 성공처럼 보이는 것을 막습니다. 오류 코드 조회는 `Object.hasOwn`(13~16단계와 동일 패턴)을 써서 `constructor` 같은 프로토타입 키가 정상 코드로 오인되지 않게 했고, 이번 세션에서 `error.code: 'constructor'`를 실제로 넣어 실행 검증했습니다(아래).
+
+### 무엇을 만들었나
+
+- `renderAiConnection`: `idle`/`loading`/`ok`/`error` 4개 상태 분기.
+  - `ok`: `audienceAuthorization`이 `test`/`verified`일 때 각각 "시험 연결 점검(test)"/"앱 권한 확인 후 점검(verified)" + `modelCount`/`checkedAt`/`transportChecked`/`help` 표시 + "사건 설명은 아직 실행하지 않았습니다" 고정 문구.
+  - `error`: `error.code`/`error.message`(호스트가 이미 안전한 고정 문장으로 변환해서 줌) 표시 + 21개 실제 코드를 8개 분류로 매핑한 `AI_CONNECTION_ERROR_GUIDANCE` 안내 + "다시 점검은 자동으로 일어나지 않습니다. 버튼을 직접 눌러 다시 시도하세요" 수동 재점검 안내. 목록 밖 코드는 `AI_REQUEST_UNVERIFIED` 안내로 폴백.
+  - 매 호출마다 새 DOM만 그리므로(모듈 전역에 이전 상태 저장 안 함), 재점검 성공이나 `idle` 복귀 시 이전 결과가 자동으로 사라짐.
+- `renderExplanation`(기초, 18단계에서 확장 예정): `explanation.status === 'ok' && explanation.data && event.id` 모두 있을 때만 바깥 요소에 `data-student-explanation-event = event.id` 속성 부여 + "사건 ID: …" + `explanation.data.summary` 표시. 그 외 모든 경우(실패, 비정상 `ok`, `explanation`/`event` 자체 없음)는 속성을 붙이지 않고 `error.code`/`error.message` + "기록은 그대로입니다." 표시.
+
+### 확인한 것 (실제로 실행한 결과)
+
+검증 기준 커밋: 이 커밋(작업 트리).
+
+1. 구문 검사:
+```
+npm --prefix on-client run check
+> node --check student/extension.mjs
+(오류 출력 없음 = 통과)
+```
+
+2. `renderAiConnection`을 실제 `student/extension.mjs`에서 Node로 직접 호출(최소 DOM 스텁, 실제 코드 import, 코드 복사본 아님)해 21개 케이스를 실행했습니다. 전부 예외 없이 설계대로 출력됨을 확인:
+   - `idle`, `loading`
+   - `ok`(`test`), `ok`(`verified`), `ok`인데 `data` 없음(방어 분기)
+   - `error` 8개 안내 분류 전부(권한 준비 중, 인증, 접근 제한, 사용량, 한도, 이용 시간, 요청 제한, 시간 초과, 모델 없음 — 각 분류를 대표하는 실제 코드로 테스트)
+   - 취소 3종(`CANCELLED`, `WB_CLCO_CANCELLED`, `REQUEST_CANCELLED`) 전부 "취소됨. 이전 결과는 현재 결과가 아닙니다" 안내로 통일됨
+   - 목록 밖 코드 → `AI_REQUEST_UNVERIFIED` 안내로 폴백
+   - **`error.code: 'constructor'`(프로토타입 오염 시도) → 정상 폴백, `constructor`가 등록된 코드처럼 처리되지 않음**
+   - 이상한 `status` 값, 입력 자체 `undefined` → 크래시 없이 "확인 불가(unknown)"로 방어
+
+3. `renderExplanation`을 같은 방식으로 9개 케이스 실행. `data-student-explanation-event` 속성이 **성공 1건에서만** 붙고, 나머지 8개(`data` 없는 `ok`, `event.id` 없는 `ok`, `event` 자체 없는 `ok`, `error`, `idle`, `explanation` 없음, 입력 `undefined`, `summary` 없는 성공)에서는 붙지 않거나(실패 케이스) 안전하게 "없음"으로 대체(summary 없는 성공 케이스)됨을 확인.
+
+4. 브라우저 실제 화면 확인: `npm --prefix on-client run demo`로 데모 서버 기동 후 Chrome으로 보호 현황 화면을 직접 조작.
+   - `idle`: "AI 연결 점검을 아직 하지 않았습니다…" 표시 확인.
+   - 「AI 연결 점검」 버튼 클릭 → 데모 환경(실제 계정·앱 권한 미연결)에서 실제로 `ON_AI_PROVISIONING_PENDING` 오류 발생 → 오류 메시지+코드, 안내 문구, 수동 재점검 안내, "자료 출처: 확인 불가(unknown)" 4줄 전부 설계대로 표시됨을 확인.
+
+### 확인하지 못한 것
+
+- `renderAiConnection`의 `ok` 상태를 **실제 서버 왕복**으로 확인하지 못했습니다. 데모 환경에는 실제 계정·AI 앱 권한 연결이 없어 `ON_AI_PROVISIONING_PENDING`만 재현됩니다 — 이는 코드 결함이 아니라 안내문의 "운영자가 먼저 준비해야 하는 것"(학생 계정·앱 권한 발급)이 아직 안 끝난 정상적인 상태입니다.
+- `loading` 상태와 실제 취소 흐름을 브라우저에서 **시각적으로**(화면에 로딩 상태가 보이는 순간) 확인하지 못했습니다. 로컬 데모 응답이 너무 빨라 화면 캡처 타이밍을 못 잡았습니다. 대신 2번 항목의 Node 실행 검증으로 해당 분기 코드 자체는 확인했습니다.
+- `renderExplanation`은 아직 "기초"만 구현되어, 실제 호스트(`app.js`)의 보안 기록 화면에서 호출되는 전체 흐름(18단계에서 확장 예정)은 확인하지 않았습니다.
+- 17단계는 아직 공식 제출 전이라 AI 판정 결과가 없습니다.
+- 이번 세션에서 쓴 Node 실행 검증 스크립트(`verify-ai-connection.mjs`, `verify-explanation.mjs`)는 세션 스크래치패드에만 작성했고 저장소에는 포함하지 않았습니다 — 재현하려면 같은 방식(최소 DOM 스텁으로 `document.createElement`만 흉내 내고 `student/extension.mjs`의 `createStudentView`를 직접 import)으로 다시 작성해야 합니다.
+
+### 보완
+
+(기록 없음 — 아직 판정 피드백을 받지 않았습니다.)
+
+**다시 실행하는 방법:** `npm --prefix on-client run check`(구문 검사), `npm --prefix on-client run demo`(브라우저로 idle/error 상태 확인 — 보호 현황 화면의 「AI 연결 점검」 버튼).

@@ -427,6 +427,85 @@ function renderStatusSection({ devices, sessions, notifications, diagnostics, mo
   return container;
 }
 
+const AUDIENCE_AUTHORIZATION_LABEL = { test: '시험 연결 점검', verified: '앱 권한 확인 후 점검' };
+
+// 오류 코드별로 사람이 직접 할 수 있는 대응을 안내한다. 목록에 없는 코드는 AI_REQUEST_UNVERIFIED 안내로 처리해 절대 비워두지 않는다.
+const AI_CONNECTION_ERROR_GUIDANCE = {
+  ON_AI_PROVISIONING_PENDING: '담당자에게 계정 연결과 앱 권한 확인을 요청하세요.',
+  AI_REQUEST_UNVERIFIED: '담당자에게 계정 연결과 앱 권한 확인을 요청하세요.',
+  SUBJECT_SCOPE_UNVERIFIED: '담당자에게 계정 연결과 앱 권한 확인을 요청하세요.',
+  ON_AI_INVALID_INPUT: '담당자에게 계정 연결과 앱 권한 확인을 요청하세요.',
+  ON_AI_INVALID_OUTPUT: '담당자에게 계정 연결과 앱 권한 확인을 요청하세요.',
+  WB_CLCO_AUTH_REQUIRED: '계정 연결을 다시 확인하고, 담당자에게 확인을 요청하세요.',
+  WB_CLCO_ACCESS_BLOCKED: '계정 연결을 다시 확인하고, 담당자에게 확인을 요청하세요.',
+  ON_AI_AUTHORIZATION_CHANGED: '계정 연결을 다시 확인하고, 담당자에게 확인을 요청하세요.',
+  WB_CLCO_COHORT_BUDGET_EXHAUSTED: '담당자에게 확인을 요청하세요.',
+  WB_CLCO_LIMIT_REACHED: '담당자에게 확인을 요청하세요.',
+  WB_CLCO_SESSION_CLOSED: '이용 시간을 확인하세요.',
+  WB_CLCO_RATE_LIMITED: '잠시 뒤 직접 다시 점검하세요.',
+  WB_CLCO_TIMEOUT: '잠시 뒤 직접 다시 점검하세요.',
+  REQUEST_TIMEOUT: '잠시 뒤 직접 다시 점검하세요.',
+  ENGINE_TIMEOUT: '잠시 뒤 직접 다시 점검하세요.',
+  TIMEOUT: '잠시 뒤 직접 다시 점검하세요.',
+  CANCELLED: '취소됨. 이전 결과는 현재 결과가 아닙니다.',
+  WB_CLCO_CANCELLED: '취소됨. 이전 결과는 현재 결과가 아닙니다.',
+  REQUEST_CANCELLED: '취소됨. 이전 결과는 현재 결과가 아닙니다.',
+  MODEL_NOT_CONFIGURED: '담당자에게 모델 허용 설정 확인을 요청하세요.',
+  ON_AI_MODEL_LIST_EMPTY: '담당자에게 모델 허용 설정 확인을 요청하세요.',
+};
+
+// 모델 목록 조회 점검과 실제 사건 설명 실행을 구분해서 보여 준다. 매번 입력만 보고 새로 그리므로
+// 재점검에 성공하면 이전 오류 안내가 저절로 사라지고, idle 로 돌아가면 이전 결과도 저절로 사라진다.
+// 자동 재점검(setInterval 등)은 두지 않으며, 다시 점검은 사용자가 버튼을 눌러야만 일어난다.
+function renderAiConnectionSection({ status, mode, data, error, checkedAt } = {}) {
+  const container = document.createElement('div');
+
+  if (status === 'idle') {
+    container.appendChild(textEl('p', 'AI 연결 점검을 아직 하지 않았습니다. 점검을 실행하면 결과가 여기 표시됩니다.'));
+  } else if (status === 'loading') {
+    container.appendChild(textEl('p', 'AI 연결 점검 중'));
+  } else if (status === 'error') {
+    const message = error?.message ?? '서버 메시지 없음';
+    const codeSuffix = error?.code ? ` (오류 코드: ${error.code})` : '';
+    container.appendChild(textEl('p', `AI 연결 점검 실패: ${message}${codeSuffix}`));
+    const guidance = Object.hasOwn(AI_CONNECTION_ERROR_GUIDANCE, error?.code)
+      ? AI_CONNECTION_ERROR_GUIDANCE[error.code]
+      : AI_CONNECTION_ERROR_GUIDANCE.AI_REQUEST_UNVERIFIED;
+    container.appendChild(textEl('p', `안내: ${guidance}`));
+    container.appendChild(textEl('p', '다시 점검은 자동으로 일어나지 않습니다. 「현재 API 연결 점검」 버튼을 직접 눌러 다시 시도하세요.'));
+  } else if (status === 'ok' && data) {
+    container.appendChild(textEl('p', `연결 점검 결과: ${labelOf(AUDIENCE_AUTHORIZATION_LABEL, data.audienceAuthorization)}`));
+    container.appendChild(textEl('p', '이것은 모델 목록 조회 점검 결과입니다. 사건 설명은 아직 실행하지 않았습니다.'));
+    container.appendChild(textEl('p', `전송 확인: ${data.transportChecked === true ? '확인됨' : '확인되지 않음'}`));
+    container.appendChild(textEl('p', `사용 가능 모델 수: ${data.modelCount ?? '확인 불가'}`));
+    container.appendChild(textEl('p', `확인 시각: ${checkedAt ?? '없음'}`));
+    if (data.help) container.appendChild(textEl('p', `도움말: ${data.help}`));
+  } else {
+    container.appendChild(textEl('p', 'AI 연결 상태: 확인 불가(unknown)'));
+  }
+
+  appendModeNote(container, mode);
+  return container;
+}
+
+// AI 설명 성공 여부는 바깥 컨테이너의 data-student-explanation-event 속성만으로 구분한다.
+// status 가 ok 라도 data 나 event.id 가 없는 비정상 응답은 실패와 같게 처리해 속성을 붙이지 않는다.
+function renderExplanationSection({ event, explanation } = {}) {
+  const container = document.createElement('div');
+
+  if (explanation?.status === 'ok' && explanation.data != null && event?.id != null) {
+    container.setAttribute('data-student-explanation-event', event.id);
+    container.appendChild(textEl('p', `사건 ID: ${event.id}`));
+    container.appendChild(textEl('p', explanation.data.summary ?? '없음'));
+  } else {
+    container.appendChild(textEl('p', `오류 코드: ${explanation?.error?.code ?? '확인 불가'}`));
+    container.appendChild(textEl('p', `오류 메시지: ${explanation?.error?.message ?? '확인 불가'}`));
+    container.appendChild(textEl('p', '기록은 그대로입니다.'));
+  }
+
+  return container;
+}
+
 export function createStudentView({ onChange } = {}) {
   return {
     renderIdentity(input) { return renderIdentitySection(input); },
@@ -434,8 +513,8 @@ export function createStudentView({ onChange } = {}) {
     renderEvents(input) { return renderEventsSection(input ?? {}, onChange); },
     renderStatus(input) { return renderStatusSection(input ?? {}); },
     renderVulnerabilities() { return '학생 구현 대기: 정확한 설치 버전·OSV 출처·조회 시각·부분 결과·조회 실패를 구분하세요.'; },
-    renderAiConnection() { return '학생 구현 대기: 모델 응답 점검과 실제 사건 설명을 구분하고 AI 오류·취소·수동 복구를 안내하세요.'; },
-    renderExplanation() { return '학생 구현 대기: 선택한 사건의 근거·규칙·현재 상태와 AI 설명을 연결하세요. 제안은 자동 실행하지 않습니다.'; },
+    renderAiConnection(input) { return renderAiConnectionSection(input ?? {}); },
+    renderExplanation(input) { return renderExplanationSection(input ?? {}); },
     renderAction() { return '학생 구현 대기: 현재 사건·조치·실제 대상·사람 확인·ACK와 원천 효과·unknown을 구분하세요.'; },
   };
 }

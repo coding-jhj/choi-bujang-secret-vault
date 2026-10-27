@@ -743,12 +743,12 @@ function renderVulnerabilitiesSection({ status, mode, data, error } = {}) {
 // 색만으로 구분하지 않는다: 한국어 이름 + 기호 + 색을 함께 쓴다(색각 차이·흑백 인쇄 대비).
 // 색은 흰 배경 글자색 기준 대비 4.5:1 이상으로 골랐다.
 // state==='ok'이면서 reason이 없을 때, 또는 state==='unavailable'이면서 reason이 위
-// 7가지 중 하나와 정확히 일치할 때만 정상 표시를 인정한다. 그 외(대소문자·공백이
+// 7가지 중 하나와 정확히 일치할 때만 ok(측정됨) 표시를 인정한다. 그 외(대소문자·공백이
 // 다르거나 문자열이 아니거나 목록에 없거나, 'ok'인데 reason이 섞여 들어온 경우 등)는
-// 전부 절대 '정상'으로 보이지 않도록 '알수없음'(known:false)으로 돌려준다.
+// 전부 절대 '측정됨'으로 보이지 않도록 '알수없음'(known:false)으로 돌려준다.
 // 이 파일 하나만 서빙되므로(/student/extension.mjs) 별도 파일로 나누지 않는다.
 // ---------------------------------------------------------------------------
-const OK_DISPLAY = Object.freeze({ state: 'ok', reason: null, label: '정상', color: '#1a7f37', symbol: '✓', known: true });
+const OK_DISPLAY = Object.freeze({ state: 'ok', reason: null, label: '측정됨', color: '#1a7f37', symbol: '✓', known: true });
 
 const UNAVAILABLE_REASON_DISPLAY = Object.freeze(Object.assign(Object.create(null), {
   permission_denied: Object.freeze({ state: 'unavailable', reason: 'permission_denied', label: '권한없음', color: '#bc4c00', symbol: '⊘', known: true }),
@@ -770,12 +770,231 @@ export function describeStatus(state, reason) {
   return UNKNOWN_STATUS_DISPLAY;
 }
 
-export function createStudentView({ onChange } = {}) {
+// ---------------------------------------------------------------------------
+// 카드① 「지금 내 PC는 안전한가?」 — renderStatus 칸 맨 앞에 붙는다.
+// public/app.js 의 STUDENT_SLOTS 는 8칸 고정이라 새 칸 대신 상태·알림 칸(renderStatus)을 넓힌다.
+// renderStatus 입력에는 PC 자료가 없으므로, createStudentView 가 받은 api.get('/api/pc/status')
+// (app.js STUDENT_GET_PATHS 허용 경로)로 「내 PC 확인」을 누를 때만 한 번 읽는다.
+// 그리기·onChange 중에는 읽지 않고, 자동 재시도·주기 조회도 없다.
+// 배지는 모두 describeStatus 로 그린다. 배지의 '측정됨'은 「이번 조회로 값을 읽었다」는 뜻일 뿐
+// 안전 판정이 아니다. 값을 읽었어도 방화벽 꺼짐·높은 사용률 같은 관찰은 따로 「주의」로 적는다.
+// 조회 실패·형식 이상·오래된 측정·항목 누락은 모두 알수없음(확인 불가)으로 보이며 측정됨으로 바꾸지 않는다.
+// 취약점은 이 칸에서 다시 조회하지 않는다(OSV 조회는 사용자가 「설치 패키지 조회」에서 직접 시작한다).
+// ---------------------------------------------------------------------------
+const PC_PATH = '/api/pc/status';
+const PC_SCHEMA = 'aleph.on.pc-status.v1';
+const PC_MAX_AGE_MS = 60000;
+const FIREWALL_PROFILES = ['Domain', 'Private', 'Public'];
+const isPlainRecord = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const isNonNegative = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0;
+const isCount = (n) => Number.isSafeInteger(n) && n >= 0;
+const gb = (n) => `${(n / 1024 ** 3).toFixed(1)} GB`;
+
+const PC_REASON_TEXT = {
+  permission_denied: '읽기 권한이 없습니다. 관리자 권한으로 바꾸기 전에 담당자에게 확인하세요.',
+  query_failed: '조회에 실패했습니다. 다시 확인하세요.',
+  invalid_response: '응답 값을 확인할 수 없습니다.',
+  invalid_sample: '측정 표본이 올바르지 않습니다. 다시 확인하세요.',
+  unsupported: '이 운영체제에서는 이 항목을 조회하지 않습니다.',
+  timeout: '조회 시간이 초과됐습니다. 잠시 후 다시 확인하세요.',
+  cancelled: '조회가 취소됐습니다.',
+};
+
+// read(metric) 은 값 모양이 계약과 맞을 때만 {value, attention} 을 돌려준다. 아니면 null.
+const PC_METRICS = [
+  { key: 'cpu', name: 'CPU', read: (m) => (m.sampleMs === 200 && isNonNegative(m.usagePercent) && m.usagePercent <= 100
+    ? { value: `${m.usagePercent.toFixed(1)}% 사용 (200ms 표본 1회)`, attention: m.usagePercent >= 90 ? '사용률이 높습니다. 짧은 표본이므로 계속되는지 다시 확인하세요.' : null }
+    : null) },
+  { key: 'memory', name: '메모리', read: (m) => (isNonNegative(m.usedBytes) && isNonNegative(m.totalBytes) && m.totalBytes > 0 && m.usedBytes <= m.totalBytes
+    ? { value: `${gb(m.usedBytes)} / ${gb(m.totalBytes)} 사용`, attention: m.usedBytes / m.totalBytes >= 0.85 ? '메모리 사용량이 높습니다. 사용 중인 앱을 확인하세요.' : null }
+    : null) },
+  { key: 'disk', name: '디스크', read: (m) => (isNonNegative(m.freeBytes) && isNonNegative(m.totalBytes) && m.totalBytes > 0 && m.freeBytes <= m.totalBytes
+    ? { value: `${gb(m.freeBytes)} 여유 / ${gb(m.totalBytes)}`, attention: m.freeBytes / m.totalBytes < 0.1 ? '남은 공간이 적습니다. 삭제 전에 파일을 확인하고 백업하세요.' : null }
+    : null) },
+  { key: 'firewall', name: '방화벽', read: (m) => {
+    if (!Array.isArray(m.profiles) || m.profiles.length !== 3
+      || !FIREWALL_PROFILES.every((name) => m.profiles.some((p) => p?.name === name && typeof p.enabled === 'boolean'))) return null;
+    const off = FIREWALL_PROFILES.filter((name) => m.profiles.find((p) => p.name === name).enabled !== true);
+    return {
+      value: FIREWALL_PROFILES.map((name) => `${name} ${m.profiles.find((p) => p.name === name).enabled ? '켜짐' : '꺼짐'}`).join(' · '),
+      attention: off.length ? `꺼진 프로필: ${off.join(', ')}. 앱은 설정을 바꾸지 않습니다.` : null,
+    };
+  } },
+  { key: 'events', name: 'Windows 기록', read: (m) => (isCount(m.warningCount) && isCount(m.errorCount) && m.warningCount + m.errorCount <= 5000
+    && m.sampleLimit === 5000 && typeof m.truncated === 'boolean'
+    ? { value: `최근 24시간 경고 ${m.warningCount}건 · 오류 ${m.errorCount}건${m.truncated ? ' (일부 집계)' : ''}`,
+      attention: m.errorCount > 0 ? `오류 기록 ${m.errorCount}건이 있습니다. 건수는 침해 판정이 아니며 기록 내용은 조회하지 않습니다.` : null,
+      pill: `경고 ${m.warningCount}건` }
+    : null) },
+];
+
+// 지표 하나를 {display, value, attention} 으로 바꾼다. 'ok' 라도 값 모양이 다르면 알수없음으로 내린다.
+function pcMetricView(spec, metric) {
+  if (!isPlainRecord(metric)) return { display: describeStatus(undefined), value: '응답에 이 항목이 없습니다 — 확인 불가', attention: null };
+  const display = describeStatus(metric.state, metric.reason);
+  if (display.state === 'ok') {
+    const read = spec.read(metric);
+    if (read) return { display, ...read };
+    return { display: describeStatus(undefined), value: '값이나 단위를 확인할 수 없습니다 — 측정됨으로 보지 않습니다', attention: null };
+  }
+  if (display.known) return { display, value: PC_REASON_TEXT[display.reason], attention: null };
+  return { display, value: '상태를 확인할 수 없습니다 — 측정됨으로 보지 않습니다', attention: null };
+}
+
+// api.get 결과(성공·실패·예외)를 카드 상태로 바꾼다. 형식·출처·측정 시각이 맞지 않으면 전체를 확인 불가로 둔다.
+export function classifyPcResult(result, now = Date.now()) {
+  if (!isPlainRecord(result) || result.ok !== true) {
+    const code = typeof result?.error?.code === 'string' ? result.error.code : 'UNKNOWN_ERROR';
+    return { status: 'failed', code };
+  }
+  const data = result.data;
+  const measured = typeof data?.measuredAt === 'string' && /(?:Z|[+-]\d{2}:\d{2})$/.test(data.measuredAt) ? Date.parse(data.measuredAt) : NaN;
+  if (!isPlainRecord(data) || data.schema !== PC_SCHEMA || data.source !== 'local-pc' || !Number.isFinite(measured) || !isPlainRecord(data.metrics)) {
+    return { status: 'failed', code: 'PC_SHAPE_UNVERIFIED' };
+  }
+  if (Math.abs(now - measured) > PC_MAX_AGE_MS) return { status: 'failed', code: 'PC_MEASUREMENT_STALE' };
+  return { status: 'ok', measuredAt: data.measuredAt, metrics: data.metrics };
+}
+
+const PC_FAILURE_TEXT = {
+  NOT_ALLOWED: '이 앱의 학생 API가 PC 조회 경로를 허용하지 않습니다.',
+  NO_STUDENT_API: '학생 API를 받지 못했습니다.',
+  PC_SHAPE_UNVERIFIED: '응답 형식을 확인할 수 없습니다.',
+  PC_MEASUREMENT_STALE: '측정 시각이 1분보다 오래됐거나 맞지 않습니다.',
+  TIMEOUT: '조회 시간이 초과됐습니다.',
+  NETWORK_ERROR: '로컬 서버에 연결할 수 없습니다.',
+};
+
+// 카드 상태 → 지표 5개의 표시. ok 가 아니면 모든 배지를 알수없음으로 둔다.
+export function pcSafetyViews(pc) {
+  return PC_METRICS.map((spec) => ({
+    spec,
+    ...(pc?.status === 'ok'
+      ? pcMetricView(spec, pc.metrics[spec.key])
+      : { display: describeStatus(undefined), value: pc?.status === 'loading' ? '확인 중' : '확인 불가', attention: null }),
+  }));
+}
+
+// 한 줄 답. 어떤 경우에도 「안전함」이라고 쓰지 않는다.
+export function pcSafetyAnswer(pc, views) {
+  if (pc?.status === 'idle') return '아직 확인하지 않았습니다(확인 불가). 「내 PC 확인」을 눌러 지금 상태를 읽으세요.';
+  if (pc?.status === 'loading') return '이 PC에서 읽는 중입니다. 결과가 오기 전에는 확인 불가입니다.';
+  if (pc?.status !== 'ok') return `이번 조회를 확인하지 못했습니다(${pc?.code ?? 'UNKNOWN_ERROR'}). 안전 여부를 판단할 수 없습니다.`;
+  const measured = views.filter((v) => v.display.state === 'ok').length;
+  const unknown = views.length - measured;
+  const attention = views.filter((v) => v.attention).length;
+  const head = `실측 ${measured}/${views.length}${unknown ? ` · 확인 불가 ${unknown}개` : ''} · 주의 관찰 ${attention}건`;
+  if (attention) return `${head} — 주의할 관찰이 있습니다. 「상세 보기」에서 확인하세요.`;
+  if (unknown) return `${head} — 확인하지 못한 항목이 있어 안전 여부를 판단할 수 없습니다.`;
+  return `${head} — 읽은 항목에서 주의 관찰은 없지만, 이것만으로 안전하다고 판정하지 않습니다.`;
+}
+
+function statusBadge(display) {
+  const badge = textEl('span', `${display.symbol} ${display.label}`);
+  badge.className = 'tag';
+  badge.dataset.statusState = display.state;
+  if (display.reason) badge.dataset.statusReason = display.reason;
+  // CSP(style-src 'self') 아래에서도 동작하도록 style 속성 문자열이 아니라 CSSOM 으로만 색을 준다. 색은 보조이고 기호·글이 본 정보다.
+  badge.style.color = display.color;
+  return badge;
+}
+
+function renderPcSafetyCard(pc, detailOpen, { onCheck, onToggle }) {
+  const card = document.createElement('section');
+  card.className = 'event';
+  card.dataset.studentPcSafety = pc?.status ?? 'unknown';
+  card.appendChild(textEl('h3', '지금 내 PC는 안전한가?'));
+
+  const views = pcSafetyViews(pc);
+  card.appendChild(textEl('p', pcSafetyAnswer(pc, views)));
+
+  // 요약: 배지 5개(접근성 기준 한 화면 5~6개 이내). 이름 + 기호 + 한국어 상태.
+  const pills = document.createElement('ul');
+  pills.className = 'plain-list';
+  for (const view of views) {
+    const li = document.createElement('li');
+    li.dataset.studentPcMetric = view.spec.key;
+    li.appendChild(textEl('span', view.display.state === 'ok' && view.pill ? `${view.spec.name} · ${view.pill}` : view.spec.name));
+    const right = document.createElement('span');
+    right.appendChild(statusBadge(view.display));
+    if (view.attention) right.appendChild(textEl('span', ' 주의'));
+    li.appendChild(right);
+    pills.appendChild(li);
+  }
+  card.appendChild(pills);
+
+  const actions = document.createElement('div');
+  actions.className = 'event-actions';
+  const loading = pc?.status === 'loading';
+  const check = textEl('button', loading ? '확인 중…' : '내 PC 확인');
+  check.type = 'button';
+  check.className = 'btn';
+  // 진행 중에는 disabled 대신 aria-disabled 로 알리고 클릭만 무시한다(초점이 버튼에서 빠지지 않게).
+  if (loading) check.setAttribute('aria-disabled', 'true');
+  check.addEventListener('click', () => { if (!loading) onCheck(); });
+  actions.appendChild(check);
+  const toggle = textEl('button', detailOpen ? '상세 닫기' : '상세 보기');
+  toggle.type = 'button';
+  toggle.className = 'btn';
+  toggle.setAttribute('aria-expanded', detailOpen ? 'true' : 'false');
+  toggle.addEventListener('click', onToggle);
+  actions.appendChild(toggle);
+  card.appendChild(actions);
+
+  if (detailOpen) {
+    const detail = document.createElement('div');
+    detail.dataset.studentPcDetail = 'open';
+    const dl = document.createElement('dl');
+    dl.className = 'kv';
+    for (const view of views) {
+      dl.appendChild(textEl('dt', view.spec.name));
+      const dd = document.createElement('dd');
+      dd.appendChild(statusBadge(view.display));
+      dd.appendChild(textEl('span', ` ${view.value}`));
+      if (view.attention) dd.appendChild(textEl('p', `주의: ${view.attention}`));
+      dl.appendChild(dd);
+    }
+    detail.appendChild(dl);
+    if (pc?.status === 'ok') detail.appendChild(textEl('p', `측정 시각: ${pc.measuredAt} · 출처: 이 PC(local-pc)`));
+    if (pc?.status === 'failed') detail.appendChild(textEl('p', `조회 실패: ${PC_FAILURE_TEXT[pc.code] ?? '응답을 확인할 수 없습니다.'} (코드: ${pc.code}). 이전 값을 현재 상태로 쓰지 않습니다.`));
+    detail.appendChild(textEl('p', '배지의 「측정됨」은 값을 읽었다는 뜻이며, 수치 자체의 안전 여부는 각 항목의 주의 표시로 따로 판단합니다. 앱은 PC 설정을 바꾸지 않고, 자동으로 다시 조회하지 않습니다.'));
+    detail.appendChild(textEl('p', '설치 패키지 취약점은 이 칸에서 조회하지 않습니다. 「설치 패키지 조회」 칸에서 직접 조회하세요. 조회하지 않은 취약점은 「발견 없음」이 아닙니다.'));
+    card.appendChild(detail);
+  }
+  return card;
+}
+
+export function createStudentView({ api, onChange } = {}) {
+  let pc = { status: 'idle' };
+  let pcGeneration = 0;
+  let pcDetailOpen = false;
+
+  // 버튼을 누를 때만 한 번 읽는다. 늦게 온 이전 응답은 버린다. 예외도 실패(확인 불가)로 처리한다.
+  async function checkPc() {
+    if (pc.status === 'loading') return;
+    const own = ++pcGeneration;
+    if (!api || typeof api.get !== 'function') { pc = { status: 'failed', code: 'NO_STUDENT_API' }; notify(onChange); return; }
+    pc = { status: 'loading' };
+    notify(onChange);
+    let result;
+    try { result = await api.get(PC_PATH); } catch { result = { ok: false, error: { code: 'CLIENT_ERROR' } }; }
+    if (own !== pcGeneration) return;
+    pc = classifyPcResult(result);
+    notify(onChange);
+  }
+
   return {
     renderIdentity(input) { return renderIdentitySection(input); },
     renderDecision(input) { return renderDecisionSection(input); },
     renderEvents(input) { return renderEventsSection(input ?? {}, onChange); },
-    renderStatus(input) { return renderStatusSection(input ?? {}); },
+    renderStatus(input) {
+      const container = renderStatusSection(input ?? {});
+      container.prepend(renderPcSafetyCard(pc, pcDetailOpen, {
+        onCheck: () => { void checkPc(); },
+        onToggle: () => { pcDetailOpen = !pcDetailOpen; notify(onChange); },
+      }));
+      return container;
+    },
     renderVulnerabilities(input) { return renderVulnerabilitiesSection(input ?? {}); },
     renderAiConnection(input) { return renderAiConnectionSection(input ?? {}); },
     renderExplanation(input) { return renderExplanationSection(input ?? {}); },

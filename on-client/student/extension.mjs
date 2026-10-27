@@ -1169,30 +1169,151 @@ function renderConnectionTrustCard(ai, pc, detailOpen, { onCheck, onToggle }) {
   return card;
 }
 
+// ---------------------------------------------------------------------------
+// 카드③ 「최근에 무슨 일이 있었나?」 — renderEvents 칸. 15단계 접속 기록·XDR 경보 목록(renderEventsSection)은
+// 바꾸지 않고 그대로 두고, 그 아래에 별도 칸으로 「최근 PC 확인 기록」을 붙인다(서로 다른 기록이라 섞지 않는다).
+// 기록 한 건 = 카드①·② 가 함께 쓰는 checkPc() 한 번의 결과(성공·실패 모두). 같은 조회를 다시 하지 않는다.
+// 의도된 설계: 기록은 createStudentView 안의 메모리 배열에만 둔다(최근 20건, 오래된 것부터 버림).
+// localStorage·서버·파일에 저장하지 않으므로 새로고침·앱 재시작 시 사라진다.
+// 기록의 「측정됨」은 그때 값을 읽었다는 뜻일 뿐 안전 판정이 아니다. 실패는 실패로만 기록한다.
+// ---------------------------------------------------------------------------
+export const PC_HISTORY_MAX = 20;
+const PC_HISTORY_VISIBLE = 5;
+// 실패 코드 → describeStatus 사유. 목록에 없는 코드는 조회실패로 둔다(측정됨이 되지 않는다).
+const PC_FAILURE_REASON = Object.assign(Object.create(null), {
+  TIMEOUT: 'timeout', PC_SHAPE_UNVERIFIED: 'invalid_response', PC_MEASUREMENT_STALE: 'invalid_response', NOT_ALLOWED: 'permission_denied',
+});
+
+// 끝난 조회(pc) 하나를 기록 한 건으로 바꾼다. 'ok' 로 분류된 응답만 outcome 'ok' 이고, 나머지는 전부 'failed'.
+export function summarizePcCheck(pc, checkedAt = new Date().toISOString()) {
+  if (pc?.status !== 'ok') {
+    const code = typeof pc?.code === 'string' ? pc.code : 'UNKNOWN_ERROR';
+    return Object.freeze({ checkedAt, outcome: 'failed', code, measured: 0, total: PC_METRICS.length, attention: 0, metrics: Object.freeze([]) });
+  }
+  const views = pcSafetyViews(pc);
+  return Object.freeze({
+    checkedAt,
+    outcome: 'ok',
+    code: null,
+    measured: views.filter((v) => v.display.state === 'ok').length,
+    total: views.length,
+    attention: views.filter((v) => v.attention).length,
+    metrics: Object.freeze(views.map((v) => Object.freeze({ name: v.spec.name, state: v.display.state, reason: v.display.reason ?? undefined }))),
+  });
+}
+
+// 새 기록을 앞에 붙이고 max 건만 남긴다(오래된 것부터 버림). 원래 배열은 바꾸지 않는다.
+export function recordPcCheck(history, entry, max = PC_HISTORY_MAX) {
+  return [entry, ...(Array.isArray(history) ? history : [])].slice(0, max);
+}
+
+// 기록 한 건의 배지와 한 줄 설명. 모든 항목을 읽은 경우만 측정됨, 일부만 읽었으면 알수없음, 실패는 실패 사유.
+export function pcHistoryView(entry) {
+  if (!isPlainRecord(entry) || (entry.outcome !== 'ok' && entry.outcome !== 'failed')) {
+    return { display: describeStatus(undefined), text: '기록 형식을 확인할 수 없음' };
+  }
+  if (entry.outcome === 'failed') {
+    return { display: describeStatus('unavailable', PC_FAILURE_REASON[entry.code] ?? 'query_failed'), text: `실패 — 조회하지 못함 (코드: ${entry.code})` };
+  }
+  const complete = isCount(entry.measured) && entry.measured === entry.total && entry.total > 0;
+  const head = complete ? `${entry.measured}/${entry.total} 측정됨` : `일부 확인 불가 (실측 ${entry.measured}/${entry.total})`;
+  return { display: complete ? describeStatus('ok') : describeStatus(undefined), text: `${head} · 주의 관찰 ${entry.attention}건` };
+}
+
+function historyTime(iso) {
+  const time = Date.parse(iso);
+  if (!Number.isFinite(time)) return '시각 확인 불가';
+  const d = new Date(time);
+  const pad2 = (n) => String(n).padStart(2, '0');
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+function renderPcHistorySection(history, showAll, { onToggle }) {
+  const section = document.createElement('section');
+  section.className = 'event-block';
+  section.dataset.studentPcHistory = String(history.length);
+  section.appendChild(textEl('h3', '최근에 무슨 일이 있었나? — 최근 PC 확인 기록'));
+  const note = textEl('p', `이 화면의 메모리에만 최근 ${PC_HISTORY_MAX}건까지 둡니다. 저장하거나 서버로 보내지 않아 새로고침·앱을 다시 열면 사라집니다(의도된 설계).`);
+  note.className = 'muted';
+  section.appendChild(note);
+
+  if (history.length === 0) {
+    section.appendChild(textEl('p', '아직 확인 기록 없음 — 「내 PC 확인」 또는 「연결 상태 확인」을 누르면 여기에 한 건씩 남습니다.'));
+    return section;
+  }
+
+  const views = history.map((entry) => ({ entry, ...pcHistoryView(entry) }));
+  const complete = views.filter((v) => v.display.state === 'ok').length;
+  const failed = views.filter((v) => v.entry.outcome === 'failed').length;
+  section.appendChild(textEl('p', `최근 ${history.length}건 · 모두 측정 ${complete}건 · 일부 확인 불가 ${history.length - complete - failed}건 · 실패 ${failed}건. 기록은 그때 읽은 결과이며 안전 판정이 아닙니다.`));
+
+  // 요약은 최신 5건만(한 화면 5~6개 이내). 나머지는 「전체 보기」로 펼친다.
+  const list = document.createElement('ul');
+  list.className = 'plain-list';
+  for (const view of showAll ? views : views.slice(0, PC_HISTORY_VISIBLE)) {
+    const li = document.createElement('li');
+    li.dataset.studentPcHistoryEntry = view.entry.outcome;
+    li.appendChild(textEl('span', `${historyTime(view.entry.checkedAt)} · ${view.text}`));
+    const right = document.createElement('span');
+    right.appendChild(statusBadge(view.display));
+    li.appendChild(right);
+    if (showAll && Array.isArray(view.entry.metrics) && view.entry.metrics.length) {
+      li.appendChild(textEl('p', view.entry.metrics.map((m) => `${m.name} ${describeStatus(m.state, m.reason).label}`).join(' · ')));
+    }
+    list.appendChild(li);
+  }
+  section.appendChild(list);
+
+  const toggle = textEl('button', showAll ? '접기' : `전체 ${history.length}건 · 항목별 보기`);
+  toggle.type = 'button';
+  toggle.className = 'btn';
+  toggle.setAttribute('aria-expanded', showAll ? 'true' : 'false');
+  toggle.addEventListener('click', onToggle);
+  section.appendChild(toggle);
+  return section;
+}
+
 export function createStudentView({ api, onChange } = {}) {
   let pc = { status: 'idle' };
   let pcGeneration = 0;
   let pcDetailOpen = false;
   let connectionDetailOpen = false;
+  // 카드③: 세션 메모리 전용 기록(최근 20건). 이 변수 밖으로 저장하지 않는다.
+  let pcHistory = [];
+  let pcHistoryShowAll = false;
+
+  function finishPc(next) {
+    pc = next;
+    pcHistory = recordPcCheck(pcHistory, summarizePcCheck(pc));
+    notify(onChange);
+  }
 
   // 버튼을 누를 때만 한 번 읽는다. 늦게 온 이전 응답은 버린다. 예외도 실패(확인 불가)로 처리한다.
+  // 끝난 조회는 성공·실패 모두 finishPc 에서 기록 한 건이 된다(조회 중 상태는 기록하지 않는다).
   async function checkPc() {
     if (pc.status === 'loading') return;
     const own = ++pcGeneration;
-    if (!api || typeof api.get !== 'function') { pc = { status: 'failed', code: 'NO_STUDENT_API' }; notify(onChange); return; }
+    if (!api || typeof api.get !== 'function') { finishPc({ status: 'failed', code: 'NO_STUDENT_API' }); return; }
     pc = { status: 'loading' };
     notify(onChange);
     let result;
     try { result = await api.get(PC_PATH); } catch { result = { ok: false, error: { code: 'CLIENT_ERROR' } }; }
     if (own !== pcGeneration) return;
-    pc = classifyPcResult(result);
-    notify(onChange);
+    finishPc(classifyPcResult(result));
   }
 
   return {
     renderIdentity(input) { return renderIdentitySection(input); },
     renderDecision(input) { return renderDecisionSection(input); },
-    renderEvents(input) { return renderEventsSection(input ?? {}, onChange); },
+    // 카드③: 15단계 기록 목록은 그대로 두고, 별도 칸으로 PC 확인 기록을 덧붙인다.
+    renderEvents(input) {
+      const wrapper = document.createElement('div');
+      wrapper.appendChild(renderEventsSection(input ?? {}, onChange));
+      wrapper.appendChild(renderPcHistorySection(pcHistory, pcHistoryShowAll, {
+        onToggle: () => { pcHistoryShowAll = !pcHistoryShowAll; notify(onChange); },
+      }));
+      return wrapper;
+    },
     renderStatus(input) {
       const container = renderStatusSection(input ?? {});
       container.prepend(renderPcSafetyCard(pc, pcDetailOpen, {

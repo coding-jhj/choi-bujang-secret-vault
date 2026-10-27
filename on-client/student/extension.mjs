@@ -741,22 +741,24 @@ function renderVulnerabilitiesSection({ status, mode, data, error } = {}) {
 // permission_denied / query_failed / invalid_response / invalid_sample /
 // unsupported / timeout / cancelled 7가지뿐이다(src/pc-status.mjs 실제 호출부 확인).
 // 색만으로 구분하지 않는다: 한국어 이름 + 기호 + 색을 함께 쓴다(색각 차이·흑백 인쇄 대비).
-// 색은 흰 배경 글자색 기준 대비 4.5:1 이상으로 골랐다.
+// 색은 배지 알약 바탕 #eceff3(.tag 의 --unknown-soft, 불투명) 위 글자색 기준 대비 4.5:1 이상으로 골랐다
+// (배지 글자 0.75rem 은 큰 글자가 아니므로 4.5:1 기준). WCAG 상대 휘도 공식으로 잰 값:
+// 측정됨 4.52 · 권한없음 4.53 · 조회실패 4.64 · 응답오류 4.53 · 표본오류 4.54 · 미지원 5.54 · 시간초과 4.50 · 취소됨 4.50 · 알수없음 12.70.
 // state==='ok'이면서 reason이 없을 때, 또는 state==='unavailable'이면서 reason이 위
 // 7가지 중 하나와 정확히 일치할 때만 ok(측정됨) 표시를 인정한다. 그 외(대소문자·공백이
 // 다르거나 문자열이 아니거나 목록에 없거나, 'ok'인데 reason이 섞여 들어온 경우 등)는
 // 전부 절대 '측정됨'으로 보이지 않도록 '알수없음'(known:false)으로 돌려준다.
 // 이 파일 하나만 서빙되므로(/student/extension.mjs) 별도 파일로 나누지 않는다.
 // ---------------------------------------------------------------------------
-const OK_DISPLAY = Object.freeze({ state: 'ok', reason: null, label: '측정됨', color: '#1a7f37', symbol: '✓', known: true });
+const OK_DISPLAY = Object.freeze({ state: 'ok', reason: null, label: '측정됨', color: '#1a7d36', symbol: '✓', known: true });
 
 const UNAVAILABLE_REASON_DISPLAY = Object.freeze(Object.assign(Object.create(null), {
-  permission_denied: Object.freeze({ state: 'unavailable', reason: 'permission_denied', label: '권한없음', color: '#bc4c00', symbol: '⊘', known: true }),
+  permission_denied: Object.freeze({ state: 'unavailable', reason: 'permission_denied', label: '권한없음', color: '#b84a00', symbol: '⊘', known: true }),
   query_failed: Object.freeze({ state: 'unavailable', reason: 'query_failed', label: '조회실패', color: '#cf222e', symbol: '✕', known: true }),
-  invalid_response: Object.freeze({ state: 'unavailable', reason: 'invalid_response', label: '응답오류', color: '#bf3989', symbol: '▲', known: true }),
-  invalid_sample: Object.freeze({ state: 'unavailable', reason: 'invalid_sample', label: '표본오류', color: '#8250df', symbol: '◆', known: true }),
+  invalid_response: Object.freeze({ state: 'unavailable', reason: 'invalid_response', label: '응답오류', color: '#bb3886', symbol: '▲', known: true }),
+  invalid_sample: Object.freeze({ state: 'unavailable', reason: 'invalid_sample', label: '표본오류', color: '#7f4edb', symbol: '◆', known: true }),
   unsupported: Object.freeze({ state: 'unavailable', reason: 'unsupported', label: '미지원', color: '#57606a', symbol: '∅', known: true }),
-  timeout: Object.freeze({ state: 'unavailable', reason: 'timeout', label: '시간초과', color: '#9a6700', symbol: '◷', known: true }),
+  timeout: Object.freeze({ state: 'unavailable', reason: 'timeout', label: '시간초과', color: '#946300', symbol: '◷', known: true }),
   cancelled: Object.freeze({ state: 'unavailable', reason: 'cancelled', label: '취소됨', color: '#0969da', symbol: '■', known: true }),
 }));
 
@@ -902,14 +904,45 @@ function statusBadge(display) {
   return badge;
 }
 
+// 콘솔 느낌 표시(카드①②③ 안에서만). 외부 stylesheet 를 불러올 수 없으므로 CSSOM 으로만 준다.
+// 숫자·단위·시각만 고정폭 글꼴로 바꾸고, 한국어 설명은 기본 글꼴 그대로 둔다(글자색·크기·초점 표시는 바꾸지 않는다).
+const MONO_FONT = "'Consolas','SFMono-Regular','Menlo',monospace";
+// 영문자 바로 뒤의 숫자(IPv4 등)는 이름의 일부이므로 고르지 않는다.
+const READOUT_TOKEN = /(?<![A-Za-z])(?:\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:\d{2})|\d{1,2}:\d{2}:\d{2}|\d+(?:\.\d+)?(?:\/\d+|\s?(?:%|GB|ms))?)/g;
+
+// textEl 과 같은 글을 만들되 숫자 조각만 고정폭 span 으로 나눈다. textContent 는 원래 글과 같다(HTML 해석 없음).
+function readoutEl(tag, text) {
+  const node = document.createElement(tag);
+  const s = String(text);
+  let last = 0;
+  for (const m of s.matchAll(READOUT_TOKEN)) {
+    if (m.index > last) node.appendChild(textEl('span', s.slice(last, m.index)));
+    const num = textEl('span', m[0]);
+    num.style.fontFamily = MONO_FONT;
+    num.style.fontVariantNumeric = 'tabular-nums';
+    node.appendChild(num);
+    last = m.index + m[0].length;
+  }
+  if (last < s.length) node.appendChild(textEl('span', s.slice(last)));
+  return node;
+}
+
+// 카드 테두리: 모서리를 조금 더 각지게, 위쪽에 강조색(--accent, 꾸밈 색을 따른다) 선 한 줄. 장식이며 정보는 담지 않는다.
+function consoleFrame(section) {
+  section.style.borderRadius = '4px';
+  section.style.borderTop = '3px solid var(--accent)';
+  return section;
+}
+
 function renderPcSafetyCard(pc, detailOpen, { onCheck, onToggle }) {
   const card = document.createElement('section');
   card.className = 'event';
   card.dataset.studentPcSafety = pc?.status ?? 'unknown';
+  consoleFrame(card);
   card.appendChild(textEl('h3', '지금 내 PC는 안전한가?'));
 
   const views = pcSafetyViews(pc);
-  card.appendChild(textEl('p', pcSafetyAnswer(pc, views)));
+  card.appendChild(readoutEl('p', pcSafetyAnswer(pc, views)));
 
   // 요약: 배지 5개(접근성 기준 한 화면 5~6개 이내). 이름 + 기호 + 한국어 상태.
   const pills = document.createElement('ul');
@@ -917,7 +950,7 @@ function renderPcSafetyCard(pc, detailOpen, { onCheck, onToggle }) {
   for (const view of views) {
     const li = document.createElement('li');
     li.dataset.studentPcMetric = view.spec.key;
-    li.appendChild(textEl('span', view.display.state === 'ok' && view.pill ? `${view.spec.name} · ${view.pill}` : view.spec.name));
+    li.appendChild(readoutEl('span', view.display.state === 'ok' && view.pill ? `${view.spec.name} · ${view.pill}` : view.spec.name));
     const right = document.createElement('span');
     right.appendChild(statusBadge(view.display));
     if (view.attention) right.appendChild(textEl('span', ' 주의'));
@@ -953,12 +986,12 @@ function renderPcSafetyCard(pc, detailOpen, { onCheck, onToggle }) {
       dl.appendChild(textEl('dt', view.spec.name));
       const dd = document.createElement('dd');
       dd.appendChild(statusBadge(view.display));
-      dd.appendChild(textEl('span', ` ${view.value}`));
+      dd.appendChild(readoutEl('span', ` ${view.value}`));
       if (view.attention) dd.appendChild(textEl('p', `주의: ${view.attention}`));
       dl.appendChild(dd);
     }
     detail.appendChild(dl);
-    if (pc?.status === 'ok') detail.appendChild(textEl('p', `측정 시각: ${pc.measuredAt} · 출처: 이 PC(local-pc)`));
+    if (pc?.status === 'ok') detail.appendChild(readoutEl('p', `측정 시각: ${pc.measuredAt} · 출처: 이 PC(local-pc)`));
     if (pc?.status === 'failed') detail.appendChild(textEl('p', `조회 실패: ${PC_FAILURE_TEXT[pc.code] ?? '응답을 확인할 수 없습니다.'} (코드: ${pc.code}). 이전 값을 현재 상태로 쓰지 않습니다.`));
     detail.appendChild(textEl('p', '배지의 「측정됨」은 값을 읽었다는 뜻이며, 수치 자체의 안전 여부는 각 항목의 주의 표시로 따로 판단합니다. 앱은 PC 설정을 바꾸지 않고, 자동으로 다시 조회하지 않습니다.'));
     detail.appendChild(textEl('p', '설치 패키지 취약점은 이 칸에서 조회하지 않습니다. 「설치 패키지 조회」 칸에서 직접 조회하세요. 조회하지 않은 취약점은 「발견 없음」이 아닙니다.'));
@@ -1093,17 +1126,18 @@ function renderConnectionTrustCard(ai, pc, detailOpen, { onCheck, onToggle }) {
   const card = document.createElement('section');
   card.className = 'event';
   card.dataset.studentConnectionTrust = pc?.status ?? 'unknown';
+  consoleFrame(card);
   card.appendChild(textEl('h3', '연결들은 믿을 수 있나?'));
 
   const views = connectionViews(ai, pc);
-  card.appendChild(textEl('p', connectionTrustAnswer(views, ai, pc)));
+  card.appendChild(readoutEl('p', connectionTrustAnswer(views, ai, pc)));
 
   const pills = document.createElement('ul');
   pills.className = 'plain-list';
   for (const view of views) {
     const li = document.createElement('li');
     li.dataset.studentConnectionMetric = view.key;
-    li.appendChild(textEl('span', view.pill ? `${view.name} · ${view.pill}` : view.name));
+    li.appendChild(readoutEl('span', view.pill ? `${view.name} · ${view.pill}` : view.name));
     const right = document.createElement('span');
     right.appendChild(statusBadge(view.display));
     if (view.attention) right.appendChild(textEl('span', ' 주의'));
@@ -1155,12 +1189,12 @@ function renderConnectionTrustCard(ai, pc, detailOpen, { onCheck, onToggle }) {
       dl.appendChild(textEl('dt', view.name));
       const dd = document.createElement('dd');
       dd.appendChild(statusBadge(view.display));
-      dd.appendChild(textEl('span', ` ${view.value}`));
+      dd.appendChild(readoutEl('span', ` ${view.value}`));
       if (view.attention) dd.appendChild(textEl('p', `주의: ${view.attention}`));
       dl.appendChild(dd);
     }
     detail.appendChild(dl);
-    if (pc?.status === 'ok') detail.appendChild(textEl('p', `측정 시각: ${pc.measuredAt} · 출처: 이 PC(local-pc)`));
+    if (pc?.status === 'ok') detail.appendChild(readoutEl('p', `측정 시각: ${pc.measuredAt} · 출처: 이 PC(local-pc)`));
     if (pc?.status === 'failed') detail.appendChild(textEl('p', `조회 실패: ${PC_FAILURE_TEXT[pc.code] ?? '응답을 확인할 수 없습니다.'} (코드: ${pc.code}). 이전 값을 현재 상태로 쓰지 않습니다.`));
     detail.appendChild(textEl('p', '장치 수와 방화벽 켜짐은 연결 신뢰 판정이 아닙니다. 지금 어떤 네트워크(회사·공용 Wi-Fi)에 붙어 있는지, 인터넷이 되는지는 이 조회에 들어 있지 않습니다. 앱은 설정을 바꾸지 않습니다.'));
     detail.appendChild(textEl('p', '외부 서비스(GitHub·Vercel·Railway·Supabase) 연결은 이 카드에서 조회하지 않습니다: 연결 전 · 확인 불가. 조회하지 않은 연결을 정상으로 보지 않습니다.'));
@@ -1232,6 +1266,11 @@ function renderPcHistorySection(history, showAll, { onToggle }) {
   const section = document.createElement('section');
   section.className = 'event-block';
   section.dataset.studentPcHistory = String(history.length);
+  // 카드①②(.event)와 같은 테두리·여백을 주고 콘솔 테두리를 얹는다(.event-block 은 CSS 테두리가 없다).
+  section.style.border = '1px solid var(--border)';
+  section.style.padding = '12px 14px';
+  section.style.marginTop = '12px';
+  consoleFrame(section);
   section.appendChild(textEl('h3', '최근에 무슨 일이 있었나? — 최근 PC 확인 기록'));
   const note = textEl('p', `이 화면의 메모리에만 최근 ${PC_HISTORY_MAX}건까지 둡니다. 저장하거나 서버로 보내지 않아 새로고침·앱을 다시 열면 사라집니다(의도된 설계).`);
   note.className = 'muted';
@@ -1245,7 +1284,7 @@ function renderPcHistorySection(history, showAll, { onToggle }) {
   const views = history.map((entry) => ({ entry, ...pcHistoryView(entry) }));
   const complete = views.filter((v) => v.display.state === 'ok').length;
   const failed = views.filter((v) => v.entry.outcome === 'failed').length;
-  section.appendChild(textEl('p', `최근 ${history.length}건 · 모두 측정 ${complete}건 · 일부 확인 불가 ${history.length - complete - failed}건 · 실패 ${failed}건. 기록은 그때 읽은 결과이며 안전 판정이 아닙니다.`));
+  section.appendChild(readoutEl('p', `최근 ${history.length}건 · 모두 측정 ${complete}건 · 일부 확인 불가 ${history.length - complete - failed}건 · 실패 ${failed}건. 기록은 그때 읽은 결과이며 안전 판정이 아닙니다.`));
 
   // 요약은 최신 5건만(한 화면 5~6개 이내). 나머지는 「전체 보기」로 펼친다.
   const list = document.createElement('ul');
@@ -1253,7 +1292,7 @@ function renderPcHistorySection(history, showAll, { onToggle }) {
   for (const view of showAll ? views : views.slice(0, PC_HISTORY_VISIBLE)) {
     const li = document.createElement('li');
     li.dataset.studentPcHistoryEntry = view.entry.outcome;
-    li.appendChild(textEl('span', `${historyTime(view.entry.checkedAt)} · ${view.text}`));
+    li.appendChild(readoutEl('span', `${historyTime(view.entry.checkedAt)} · ${view.text}`));
     const right = document.createElement('span');
     right.appendChild(statusBadge(view.display));
     li.appendChild(right);

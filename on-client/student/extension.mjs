@@ -118,7 +118,7 @@ function renderDecisionSection({ status, mode, data, error, appId }) {
   } else if (status === 'loading') {
     container.appendChild(textEl('p', `판정 확인 중${appId ? ` (앱: ${appId})` : ''}`));
   } else if (status === 'error') {
-    container.appendChild(textEl('p', `요청 실패: ${error?.message ?? '알 수 없는 오류'}`));
+    container.appendChild(textEl('p', `요청 실패: ${error?.message ?? '서버 메시지 없음'}`));
     container.appendChild(textEl('p', '이것은 접근 거부 판정이 아닙니다. 판정을 받지 못했으며 접근은 허용되지 않았습니다.'));
   } else if (status === 'ok' && data) {
     container.appendChild(textEl('p', `앱: ${data.appId ?? appId ?? '확인 불가'}`));
@@ -172,6 +172,38 @@ function notify(onChange) {
   if (typeof onChange === 'function') onChange();
 }
 
+// 다시 그린 뒤 초점 되돌리기. 앱은 onChange·자료 갱신 때마다 학생 칸 8개의 DOM 을 통째로 바꾸므로
+// (public/app.js renderAllStudent → setChildren → replaceChildren), 초점이 있던 버튼이 문서에서 빠지며 초점이 body 로 떨어진다.
+// 그래서 다시 그릴 수 있는 조작 요소마다 고정 이름(data-student-focus-key)을 붙이고, 표시 함수가 불릴 때(옛 DOM 이 아직 있을 때)
+// 초점이 있던 요소의 이름과 화면 위치를 기억해 두었다가, 새 DOM 이 들어간 뒤(같은 동기 작업이 끝난 직후의 microtask)
+// 같은 이름의 새 요소로 초점을 옮기고 화면 위치를 맞춘다. DOM 참조는 버려질 옛 요소를 가리키므로 쓰지 않는다.
+// 사용자가 그 사이 다른 곳으로 초점을 옮겼거나, 같은 이름의 요소가 새 화면에 없으면(예: 걸러져 사라진 기록) 아무것도 하지 않는다.
+let focusRestoreQueued = false;
+
+function focusKey(node, key) {
+  node.dataset.studentFocusKey = key;
+  return node;
+}
+
+function rememberFocus() {
+  if (focusRestoreQueued || typeof document === 'undefined' || typeof queueMicrotask !== 'function') return;
+  const active = document.activeElement;
+  const key = active?.dataset?.studentFocusKey;
+  if (typeof key !== 'string' || key === '') return;
+  const top = typeof active.getBoundingClientRect === 'function' ? active.getBoundingClientRect().top : NaN;
+  focusRestoreQueued = true;
+  queueMicrotask(() => {
+    focusRestoreQueued = false;
+    const now = document.activeElement;
+    if (now && now !== document.body && now.isConnected) return;
+    const next = [...document.querySelectorAll('[data-student-focus-key]')].find((node) => node.dataset.studentFocusKey === key);
+    if (!next) return;
+    next.focus({ preventScroll: true });
+    const shift = Number.isFinite(top) ? next.getBoundingClientRect().top - top : 0;
+    if (shift && typeof window !== 'undefined') window.scrollBy(0, shift);
+  });
+}
+
 function atTime(event) {
   const time = Date.parse(event?.at);
   return Number.isNaN(time) ? -Infinity : time;
@@ -199,7 +231,7 @@ function renderEventFilter(filter, events, onChange) {
 
   const label = document.createElement('label');
   label.appendChild(textEl('span', `${filter.name} `));
-  const select = document.createElement('select');
+  const select = focusKey(document.createElement('select'), `event-filter:${filter.key}`);
   select.setAttribute('aria-label', filter.name);
   const all = textEl('option', '전체(all)');
   all.value = 'all';
@@ -256,6 +288,7 @@ function renderEventDetail(event) {
     for (const action of actions) {
       const button = textEl('button', `${String(action)} 미지원`);
       button.type = 'button';
+      button.className = 'btn';
       button.disabled = true;
       detail.appendChild(button);
     }
@@ -273,8 +306,10 @@ function renderEventRow(event, onChange) {
   row.appendChild(textEl('p', `요약: ${event.summary ?? '없음'}`));
 
   const open = selectedEventId === event.id;
-  const button = textEl('button', `${event.id} 상세`);
+  // 접근 가능한 이름 「<event.id> 상세」는 자동 확인이 정확히 보는 이름이라(docs/STUDENT_PROMPTS.md) 바꾸지 않는다.
+  const button = focusKey(textEl('button', `${event.id} 상세`), `event-detail:${event.id}`);
   button.type = 'button';
+  button.className = 'btn';
   button.setAttribute('aria-expanded', open ? 'true' : 'false');
   button.addEventListener('click', () => {
     selectedEventId = selectedEventId === event.id ? null : event.id;
@@ -380,8 +415,9 @@ function renderDiagnosticsSection(diagnostics) {
     for (const line of diagnosticsSafeLines(data)) section.appendChild(textEl('p', line));
     section.appendChild(textEl('p', '이 정보는 도움을 요청할 때 담당자에게 전달하도록 복사하는 점검용 정보입니다. 열쇠·토큰 같은 비밀값은 포함하지 않으며, 누를 때만 복사되고 어디에도 자동 전송되지 않습니다.'));
 
-    const button = textEl('button', '도움정보 복사');
+    const button = focusKey(textEl('button', '도움정보 복사'), 'diagnostics-copy');
     button.type = 'button';
+    button.className = 'btn';
     const result = document.createElement('p');
     button.addEventListener('click', () => {
       const text = diagnosticsSafeLines(data).join('\n');
@@ -497,9 +533,9 @@ function renderExplanationSection({ event, explanation, checkedAt } = {}) {
   const container = document.createElement('div');
 
   if (explanation?.status === 'error') {
-    container.appendChild(textEl('p', `AI 설명 실패: ${explanation.error?.message ?? '확인 불가'}`));
+    container.appendChild(textEl('p', `AI 설명 실패: ${explanation.error?.message ?? '서버 메시지 없음'}`));
     container.appendChild(textEl('p', `오류 코드: ${explanation.error?.code ?? '확인 불가'}`));
-    container.appendChild(textEl('p', '기록은 그대로입니다.'));
+    container.appendChild(textEl('p', '기록은 그대로입니다(보안 기록은 바뀌지 않았고, AI 설명만 받지 못했습니다).'));
     return container;
   }
 
@@ -610,7 +646,7 @@ function renderActionSection({ status, event, actionId, target, receipt, observa
   } else if (status === 'error') {
     container.appendChild(textEl('p', '요청이 처리되지 않았습니다(error).'));
     container.appendChild(textEl('p', `오류 코드: ${error?.code ?? '확인 불가'}`));
-    container.appendChild(textEl('p', `오류 메시지: ${error?.message ?? '확인 불가'}`));
+    container.appendChild(textEl('p', `오류 메시지: ${error?.message ?? '서버 메시지 없음'}`));
   } else {
     container.appendChild(textEl('p', '결과 불명(unknown). 알 수 없는 상태값입니다 — 결과를 다시 조회하세요.'));
   }
@@ -673,7 +709,7 @@ function renderVulnerabilitiesSection({ status, mode, data, error } = {}) {
   }
 
   if (status === 'error') {
-    container.appendChild(textEl('p', `조회 실패: ${error?.message ?? '확인 불가'}`));
+    container.appendChild(textEl('p', `조회 실패: ${error?.message ?? '서버 메시지 없음'}`));
     container.appendChild(textEl('p', `오류 코드: ${error?.code ?? '확인 불가'}`));
     appendModeNote(container, mode);
     return container;
@@ -866,6 +902,9 @@ const PC_FAILURE_TEXT = {
   PC_MEASUREMENT_STALE: '측정 시각이 1분보다 오래됐거나 맞지 않습니다.',
   TIMEOUT: '조회 시간이 초과됐습니다.',
   NETWORK_ERROR: '로컬 서버에 연결할 수 없습니다.',
+  INVALID_RESPONSE: '서버 응답을 읽을 수 없거나 형식이 다릅니다.',
+  CANCELLED: '조회가 취소됐습니다.',
+  CLIENT_ERROR: '화면에서 조회를 처리하지 못했습니다.',
 };
 
 // 카드 상태 → 지표 하나의 표시. ok 가 아니면 배지를 알수없음으로 둔다.
@@ -884,7 +923,10 @@ export function pcSafetyViews(pc) {
 export function pcSafetyAnswer(pc, views) {
   if (pc?.status === 'idle') return '아직 확인하지 않았습니다(확인 불가). 「내 PC 확인」을 눌러 지금 상태를 읽으세요.';
   if (pc?.status === 'loading') return '이 PC에서 읽는 중입니다. 결과가 오기 전에는 확인 불가입니다.';
-  if (pc?.status !== 'ok') return `이번 조회를 확인하지 못했습니다(${pc?.code ?? 'UNKNOWN_ERROR'}). 안전 여부를 판단할 수 없습니다.`;
+  if (pc?.status !== 'ok') {
+    const code = pc?.code ?? 'UNKNOWN_ERROR';
+    return `이번 조회를 확인하지 못했습니다 — ${PC_FAILURE_TEXT[code] ?? '응답을 확인할 수 없습니다.'} (코드: ${code}) 안전 여부를 판단할 수 없습니다.`;
+  }
   const measured = views.filter((v) => v.display.state === 'ok').length;
   const unknown = views.length - measured;
   const attention = views.filter((v) => v.attention).length;
@@ -962,14 +1004,14 @@ function renderPcSafetyCard(pc, detailOpen, { onCheck, onToggle }) {
   const actions = document.createElement('div');
   actions.className = 'event-actions';
   const loading = pc?.status === 'loading';
-  const check = textEl('button', loading ? '확인 중…' : '내 PC 확인');
+  const check = focusKey(textEl('button', loading ? '확인 중…' : '내 PC 확인'), 'pc-check');
   check.type = 'button';
   check.className = 'btn';
   // 진행 중에는 disabled 대신 aria-disabled 로 알리고 클릭만 무시한다(초점이 버튼에서 빠지지 않게).
   if (loading) check.setAttribute('aria-disabled', 'true');
   check.addEventListener('click', () => { if (!loading) onCheck(); });
   actions.appendChild(check);
-  const toggle = textEl('button', detailOpen ? '상세 닫기' : '상세 보기');
+  const toggle = focusKey(textEl('button', detailOpen ? '상세 닫기' : '상세 보기'), 'pc-detail');
   toggle.type = 'button';
   toggle.className = 'btn';
   toggle.setAttribute('aria-expanded', detailOpen ? 'true' : 'false');
@@ -1146,23 +1188,6 @@ function renderConnectionTrustCard(ai, pc, detailOpen, { onCheck, onToggle }) {
   }
   card.appendChild(pills);
 
-  const actions = document.createElement('div');
-  actions.className = 'event-actions';
-  const loading = pc?.status === 'loading';
-  const check = textEl('button', loading ? '확인 중…' : '연결 상태 확인');
-  check.type = 'button';
-  check.className = 'btn';
-  if (loading) check.setAttribute('aria-disabled', 'true');
-  check.addEventListener('click', () => { if (!loading) onCheck(); });
-  actions.appendChild(check);
-  const toggle = textEl('button', detailOpen ? '상세 닫기' : '상세 보기');
-  toggle.type = 'button';
-  toggle.className = 'btn';
-  toggle.setAttribute('aria-expanded', detailOpen ? 'true' : 'false');
-  toggle.addEventListener('click', onToggle);
-  actions.appendChild(toggle);
-  card.appendChild(actions);
-
   // ① AI 게이트웨이 연결: 17단계 표시를 그대로 둔다(항상 보임).
   const aiBlock = connectionBlock('ai-gateway', '① AI 게이트웨이 연결 — 모델 응답 점검',
     'ALEPH AI 게이트웨이까지의 연결입니다. 회사 시스템(SDP) 연결과 다른 연결이며, 한쪽 결과로 다른 쪽을 판단하지 않습니다.');
@@ -1179,6 +1204,26 @@ function renderConnectionTrustCard(ai, pc, detailOpen, { onCheck, onToggle }) {
   sdpBlock.appendChild(sdpLine);
   if (sdp.attention) sdpBlock.appendChild(textEl('p', `주의: ${sdp.attention}`));
   card.appendChild(sdpBlock);
+
+  // 토글 버튼 바로 다음에 그 패널(③)이 와야 APG Disclosure 패턴을 지킨다. ①②는 토글 대상이
+  // 아닌 항상 보이는 칸이라 actions 앞으로 옮겨, actions(토글 포함)와 그 패널 사이에
+  // 다른 섹션이 끼지 않게 한다.
+  const actions = document.createElement('div');
+  actions.className = 'event-actions';
+  const loading = pc?.status === 'loading';
+  const check = focusKey(textEl('button', loading ? '확인 중…' : '연결 상태 확인'), 'connection-check');
+  check.type = 'button';
+  check.className = 'btn';
+  if (loading) check.setAttribute('aria-disabled', 'true');
+  check.addEventListener('click', () => { if (!loading) onCheck(); });
+  actions.appendChild(check);
+  const toggle = focusKey(textEl('button', detailOpen ? '상세 닫기' : '상세 보기'), 'connection-detail');
+  toggle.type = 'button';
+  toggle.className = 'btn';
+  toggle.setAttribute('aria-expanded', detailOpen ? 'true' : 'false');
+  toggle.addEventListener('click', onToggle);
+  actions.appendChild(toggle);
+  card.appendChild(actions);
 
   if (detailOpen) {
     const detail = connectionBlock('pc-network', '③ 이 PC의 네트워크·방화벽', '「내 PC 확인」과 같은 조회를 함께 씁니다. 이 칸이 따로 다시 조회하지 않습니다.');
@@ -1216,6 +1261,7 @@ const PC_HISTORY_VISIBLE = 5;
 // 실패 코드 → describeStatus 사유. 목록에 없는 코드는 조회실패로 둔다(측정됨이 되지 않는다).
 const PC_FAILURE_REASON = Object.assign(Object.create(null), {
   TIMEOUT: 'timeout', PC_SHAPE_UNVERIFIED: 'invalid_response', PC_MEASUREMENT_STALE: 'invalid_response', NOT_ALLOWED: 'permission_denied',
+  INVALID_RESPONSE: 'invalid_response', CANCELLED: 'cancelled',
 });
 
 // 끝난 조회(pc) 하나를 기록 한 건으로 바꾼다. 'ok' 로 분류된 응답만 outcome 'ok' 이고, 나머지는 전부 'failed'.
@@ -1303,7 +1349,8 @@ function renderPcHistorySection(history, showAll, { onToggle }) {
   }
   section.appendChild(list);
 
-  const toggle = textEl('button', showAll ? '접기' : `전체 ${history.length}건 · 항목별 보기`);
+  // 카드①②와 같은 「상세 보기 / 상세 닫기」 짝을 쓴다. 무엇이 펼쳐지는지는 열기 버튼 뒤에 덧붙인다.
+  const toggle = focusKey(textEl('button', showAll ? '상세 닫기' : `상세 보기 — 전체 ${history.length}건 · 항목별`), 'pc-history-toggle');
   toggle.type = 'button';
   toggle.className = 'btn';
   toggle.setAttribute('aria-expanded', showAll ? 'true' : 'false');
@@ -1341,7 +1388,7 @@ export function createStudentView({ api, onChange } = {}) {
     finishPc(classifyPcResult(result));
   }
 
-  return {
+  const view = {
     renderIdentity(input) { return renderIdentitySection(input); },
     renderDecision(input) { return renderDecisionSection(input); },
     // 카드③: 15단계 기록 목록은 그대로 두고, 별도 칸으로 PC 확인 기록을 덧붙인다.
@@ -1372,4 +1419,10 @@ export function createStudentView({ api, onChange } = {}) {
     renderExplanation(input) { return renderExplanationSection(input ?? {}); },
     renderAction(input) { return renderActionSection(input ?? {}); },
   };
+  // 표시 함수 8개 모두 그리기 전에 초점을 기억한다(누가 다시 그리게 했든 — 버튼·자료 갱신 모두 같은 길로 들어온다).
+  for (const name of Object.keys(view)) {
+    const render = view[name];
+    view[name] = (input) => { rememberFocus(); return render(input); };
+  }
+  return view;
 }

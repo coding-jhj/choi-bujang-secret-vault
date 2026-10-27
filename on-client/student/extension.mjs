@@ -55,9 +55,15 @@ function renderMeSection(me) {
   section.appendChild(textEl('h3', '현재 로그인'));
   if (appendResourceState(section, me, '로그인')) {
     const { user, device, session } = me.data;
-    section.appendChild(textEl('p', `사용자: ${user.label} (ID: ${user.id})`));
-    section.appendChild(textEl('p', `현재 기기: ${device.label} (ID: ${device.id}) — ${deviceStatusText(device.status)}`));
-    section.appendChild(textEl('p', `현재 세션: ${session.id} — ${sessionStatusText(session.status)}`));
+    // 문장 3개를 한 번에 나열하던 것을, 제공 패널(「현재 로그인」)과 같은 라벨:값 정렬(.kv)로 바꿔
+    // 한눈에 훑어볼 수 있게 한다(host 가 이미 정의한 클래스를 재사용 — 새 CSS 아님).
+    const dl = document.createElement('dl');
+    dl.className = 'kv';
+    const row = (label, value) => { dl.appendChild(textEl('dt', label)); dl.appendChild(textEl('dd', value)); };
+    row('사용자', `${user.label} (ID: ${user.id})`);
+    row('현재 기기', `${device.label} (ID: ${device.id}) — ${deviceStatusText(device.status)}`);
+    row('현재 세션', `${session.id} — ${sessionStatusText(session.status)}`);
+    section.appendChild(dl);
   }
   appendModeNote(section, me?.mode);
   return section;
@@ -71,6 +77,7 @@ function renderDevicesSection(devices) {
       section.appendChild(textEl('p', '등록된 기기가 없습니다'));
     } else {
       const list = document.createElement('ul');
+      list.className = 'plain-list';
       for (const device of devices.data) {
         list.appendChild(textEl('li', `${device.label} (ID: ${device.id}) — ${deviceStatusText(device.status)}`));
       }
@@ -89,6 +96,7 @@ function renderSessionsSection(sessions) {
       section.appendChild(textEl('p', '현재 연결된 세션이 없습니다'));
     } else {
       const list = document.createElement('ul');
+      list.className = 'plain-list';
       for (const session of sessions.data) {
         list.appendChild(textEl('li', `세션 ${session.id} — ${sessionStatusText(session.status)}`));
       }
@@ -396,6 +404,7 @@ function renderNotificationsSection(notifications) {
     section.appendChild(textEl('p', '주의할 알림이 없습니다'));
   } else {
     const ul = document.createElement('ul');
+    ul.className = 'plain-list';
     for (const item of list) {
       ul.appendChild(textEl('li', `[${safeValue(item?.resource)}] ${safeValue(item?.code)}: ${safeValue(item?.message)}`));
     }
@@ -841,13 +850,13 @@ const PC_REASON_TEXT = {
 // read(metric) 은 값 모양이 계약과 맞을 때만 {value, attention} 을 돌려준다. 아니면 null.
 const PC_METRICS = [
   { key: 'cpu', name: 'CPU', read: (m) => (m.sampleMs === 200 && isNonNegative(m.usagePercent) && m.usagePercent <= 100
-    ? { value: `${m.usagePercent.toFixed(1)}% 사용 (200ms 표본 1회)`, attention: m.usagePercent >= 90 ? '사용률이 높습니다. 짧은 표본이므로 계속되는지 다시 확인하세요.' : null }
+    ? { value: `${m.usagePercent.toFixed(1)}% 사용 (200ms 표본 1회)`, percent: m.usagePercent, attention: m.usagePercent >= 90 ? '사용률이 높습니다. 짧은 표본이므로 계속되는지 다시 확인하세요.' : null }
     : null) },
   { key: 'memory', name: '메모리', read: (m) => (isNonNegative(m.usedBytes) && isNonNegative(m.totalBytes) && m.totalBytes > 0 && m.usedBytes <= m.totalBytes
-    ? { value: `${gb(m.usedBytes)} / ${gb(m.totalBytes)} 사용`, attention: m.usedBytes / m.totalBytes >= 0.85 ? '메모리 사용량이 높습니다. 사용 중인 앱을 확인하세요.' : null }
+    ? { value: `${gb(m.usedBytes)} / ${gb(m.totalBytes)} 사용`, percent: (m.usedBytes / m.totalBytes) * 100, attention: m.usedBytes / m.totalBytes >= 0.85 ? '메모리 사용량이 높습니다. 사용 중인 앱을 확인하세요.' : null }
     : null) },
   { key: 'disk', name: '디스크', read: (m) => (isNonNegative(m.freeBytes) && isNonNegative(m.totalBytes) && m.totalBytes > 0 && m.freeBytes <= m.totalBytes
-    ? { value: `${gb(m.freeBytes)} 여유 / ${gb(m.totalBytes)}`, attention: m.freeBytes / m.totalBytes < 0.1 ? '남은 공간이 적습니다. 삭제 전에 파일을 확인하고 백업하세요.' : null }
+    ? { value: `${gb(m.freeBytes)} 여유 / ${gb(m.totalBytes)}`, percent: (1 - m.freeBytes / m.totalBytes) * 100, attention: m.freeBytes / m.totalBytes < 0.1 ? '남은 공간이 적습니다. 삭제 전에 파일을 확인하고 백업하세요.' : null }
     : null) },
   { key: 'firewall', name: '방화벽', read: (m) => {
     if (!Array.isArray(m.profiles) || m.profiles.length !== 3
@@ -976,6 +985,26 @@ function consoleFrame(section) {
   return section;
 }
 
+// 사용률 막대: 보조 표시일 뿐이다. 숫자는 이미 옆 글로 나와 있으므로 스크린리더에 중복 안내하지 않도록
+// aria-hidden 을 준다. percent 가 숫자가 아니거나 음수·NaN 이면 그리지 않는다(null 반환, 호출부가 생략).
+function usageBar(percent, attention) {
+  if (typeof percent !== 'number' || !Number.isFinite(percent) || percent < 0) return null;
+  const clamped = Math.min(100, percent);
+  const track = document.createElement('div');
+  track.setAttribute('aria-hidden', 'true');
+  track.style.height = '6px';
+  track.style.borderRadius = '3px';
+  track.style.background = 'var(--border)';
+  track.style.overflow = 'hidden';
+  track.style.marginTop = '4px';
+  const fill = document.createElement('div');
+  fill.style.height = '100%';
+  fill.style.width = `${clamped}%`;
+  fill.style.background = attention ? 'var(--deny)' : 'var(--accent)';
+  track.appendChild(fill);
+  return track;
+}
+
 function renderPcSafetyCard(pc, detailOpen, { onCheck, onToggle }) {
   const card = document.createElement('section');
   card.className = 'event';
@@ -1029,6 +1058,8 @@ function renderPcSafetyCard(pc, detailOpen, { onCheck, onToggle }) {
       const dd = document.createElement('dd');
       dd.appendChild(statusBadge(view.display));
       dd.appendChild(readoutEl('span', ` ${view.value}`));
+      const bar = usageBar(view.percent, Boolean(view.attention));
+      if (bar) dd.appendChild(bar);
       if (view.attention) dd.appendChild(textEl('p', `주의: ${view.attention}`));
       dl.appendChild(dd);
     }
@@ -1157,6 +1188,10 @@ function connectionBlock(key, title, note) {
   const block = document.createElement('section');
   block.className = 'event-block';
   block.dataset.studentConnection = key;
+  // ①②③ 칸이 바로 붙어 보이지 않도록 위쪽 여백을 준다(장식, 정보 아님).
+  block.style.marginTop = '14px';
+  block.style.paddingTop = '10px';
+  block.style.borderTop = '1px solid var(--border)';
   block.appendChild(textEl('h4', title));
   const noteEl = textEl('p', note);
   noteEl.className = 'muted';
@@ -1235,6 +1270,8 @@ function renderConnectionTrustCard(ai, pc, detailOpen, { onCheck, onToggle }) {
       const dd = document.createElement('dd');
       dd.appendChild(statusBadge(view.display));
       dd.appendChild(readoutEl('span', ` ${view.value}`));
+      const bar = usageBar(view.percent, Boolean(view.attention));
+      if (bar) dd.appendChild(bar);
       if (view.attention) dd.appendChild(textEl('p', `주의: ${view.attention}`));
       dl.appendChild(dd);
     }

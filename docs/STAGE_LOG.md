@@ -920,13 +920,13 @@ EXIT=0
 
 ### 막은 공격
 
-모델 목록 조회(연결 테스트) 성공을 실제 사건 설명이 실행된 것처럼 보여주면, 사용자가 "AI가 이미 보안 사건을 분석했다"고 오인할 수 있습니다(판정 정확성 위장). `renderAiConnection`의 `ok` 화면에는 항상 "사건 설명은 아직 실행하지 않았습니다" 고정 문구를 넣어 연결 점검과 사건 설명 실행을 구분합니다. `error.code` 원문(영문 코드 21개, `on-client/public/app.js:160-180`의 `AI_MESSAGES`)을 그대로 노출하는 대신 8개 안전 분류로 매핑한 안내 문구를 함께 보여줘, 목록 밖 코드가 와도 항상 안내가 비지 않도록 합니다. `renderExplanation`은 `data-student-explanation-event` 속성을 **실제 성공(ok && data && event.id 모두 존재)한 경우에만** 붙여, 실패나 비정상 응답이 성공처럼 보이는 것을 막습니다. 오류 코드 조회는 `Object.hasOwn`(13~16단계와 동일 패턴)을 써서 `constructor` 같은 프로토타입 키가 정상 코드로 오인되지 않게 했고, 이번 세션에서 `error.code: 'constructor'`를 실제로 넣어 실행 검증했습니다(아래).
+모델 목록 조회(연결 테스트) 성공을 실제 사건 설명이 실행된 것처럼 보여주면, 사용자가 "AI가 이미 보안 사건을 분석했다"고 오인할 수 있습니다(판정 정확성 위장). `renderAiConnection`의 `ok` 화면에는 항상 "사건 설명은 아직 실행하지 않았습니다" 고정 문구를 넣어 연결 점검과 사건 설명 실행을 구분합니다. `error.code` 원문(영문 코드 21개, `on-client/public/app.js:160-180`의 `AI_MESSAGES`)을 그대로 노출하는 대신 7가지 안전 안내 문구로 매핑해 함께 보여줘, 목록 밖 코드가 와도 항상 안내가 비지 않도록 합니다(21개 코드를 Node로 직접 세어 재확인한 결과, 서로 다른 안내 문구는 정확히 7개입니다 — 일부 코드끼리 같은 문구를 공유합니다). `renderExplanation`은 `data-student-explanation-event` 속성을 **실제 성공(ok && data && event.id 모두 존재)한 경우에만** 붙여, 실패나 비정상 응답이 성공처럼 보이는 것을 막습니다. 오류 코드 조회는 `Object.hasOwn`(13~16단계와 동일 패턴)을 써서 `constructor` 같은 프로토타입 키가 정상 코드로 오인되지 않게 했고, 이번 세션에서 `error.code: 'constructor'`를 실제로 넣어 실행 검증했습니다(아래).
 
 ### 무엇을 만들었나
 
 - `renderAiConnection`: `idle`/`loading`/`ok`/`error` 4개 상태 분기.
   - `ok`: `audienceAuthorization`이 `test`/`verified`일 때 각각 "시험 연결 점검(test)"/"앱 권한 확인 후 점검(verified)" + `modelCount`/`checkedAt`/`transportChecked`/`help` 표시 + "사건 설명은 아직 실행하지 않았습니다" 고정 문구.
-  - `error`: `error.code`/`error.message`(호스트가 이미 안전한 고정 문장으로 변환해서 줌) 표시 + 21개 실제 코드를 8개 분류로 매핑한 `AI_CONNECTION_ERROR_GUIDANCE` 안내 + "다시 점검은 자동으로 일어나지 않습니다. 버튼을 직접 눌러 다시 시도하세요" 수동 재점검 안내. 목록 밖 코드는 `AI_REQUEST_UNVERIFIED` 안내로 폴백.
+  - `error`: `error.code`/`error.message`(호스트가 이미 안전한 고정 문장으로 변환해서 줌) 표시 + 21개 실제 코드를 7가지 안내 문구로 매핑한 `AI_CONNECTION_ERROR_GUIDANCE` 안내 + "다시 점검은 자동으로 일어나지 않습니다. 버튼을 직접 눌러 다시 시도하세요" 수동 재점검 안내. 목록 밖 코드는 `AI_REQUEST_UNVERIFIED` 안내로 폴백.
   - 매 호출마다 새 DOM만 그리므로(모듈 전역에 이전 상태 저장 안 함), 재점검 성공이나 `idle` 복귀 시 이전 결과가 자동으로 사라짐.
 - `renderExplanation`(기초, 18단계에서 확장 예정): `explanation.status === 'ok' && explanation.data && event.id` 모두 있을 때만 바깥 요소에 `data-student-explanation-event = event.id` 속성 부여 + "사건 ID: …" + `explanation.data.summary` 표시. 그 외 모든 경우(실패, 비정상 `ok`, `explanation`/`event` 자체 없음)는 속성을 붙이지 않고 `error.code`/`error.message` + "기록은 그대로입니다." 표시.
 
@@ -944,7 +944,7 @@ npm --prefix on-client run check
 2. `renderAiConnection`을 실제 `student/extension.mjs`에서 Node로 직접 호출(최소 DOM 스텁, 실제 코드 import, 코드 복사본 아님)해 21개 케이스를 실행했습니다. 전부 예외 없이 설계대로 출력됨을 확인:
    - `idle`, `loading`
    - `ok`(`test`), `ok`(`verified`), `ok`인데 `data` 없음(방어 분기)
-   - `error` 8개 안내 분류 전부(권한 준비 중, 인증, 접근 제한, 사용량, 한도, 이용 시간, 요청 제한, 시간 초과, 모델 없음 — 각 분류를 대표하는 실제 코드로 테스트)
+   - `error` 7가지 안내 문구 전부(권한 준비 중·확인 불가, 인증·접근 제한, 사용량·한도, 이용 시간, 요청 제한·시간 초과, 취소, 모델 없음 — 각 문구를 대표하는 실제 코드로 테스트)
    - 취소 3종(`CANCELLED`, `WB_CLCO_CANCELLED`, `REQUEST_CANCELLED`) 전부 "취소됨. 이전 결과는 현재 결과가 아닙니다" 안내로 통일됨
    - 목록 밖 코드 → `AI_REQUEST_UNVERIFIED` 안내로 폴백
    - **`error.code: 'constructor'`(프로토타입 오염 시도) → 정상 폴백, `constructor`가 등록된 코드처럼 처리되지 않음**
@@ -1147,7 +1147,7 @@ npm --prefix on-client run check
 
 ### 막은 공격
 
-판정 AI가 이번 단계는 코드를 실행하지 않고 "문서 내용과 실제 코드가 맞는지"만 대조합니다. 문서에 추측·과장이 섞이면 바로 불일치로 드러납니다. `on-client/docs/STUDENT_RUNBOOK.md` 작성 전, `.on-starter-manifest.json`의 56개 파일 해시를 작업 트리와 실제로 대조해 "학생이 수정한 파일은 `student/extension.mjs` 하나뿐"이라는 걸 확인하고 적었습니다(추측 아님). 실행 명령·시작 메시지·포트 검증 로직(`Host` 헤더 검사 등)도 전부 코드 줄 번호 근거와 함께 적었고, 포트 충돌·버전 범위 밖 같은 시나리오는 "코드로만 확인, 실행 안 함"이라고 명시해 "확인했다고 적었지만 실제로는 안 한 것"이 되지 않게 했습니다. 기존 문서(`CONNECTION_TROUBLESHOOT.md`)에 빠져 있던 실제 오류 코드(`HOST_REJECTED`/`QUERY_REJECTED`/`ORIGIN_REJECTED`)도 코드 조사로 발견해 추가했습니다.
+판정 AI가 이번 단계는 코드를 실행하지 않고 "문서 내용과 실제 코드가 맞는지"만 대조합니다. 문서에 추측·과장이 섞이면 바로 불일치로 드러납니다. `on-client/docs/STUDENT_RUNBOOK.md` 작성 전, `.on-starter-manifest.json`의 56개 파일 해시를 작업 트리와 실제로 대조해 "학생이 수정한 파일은 `student/extension.mjs` 하나뿐"이라는 걸 확인하고 적었습니다(추측 아님). 실행 명령·시작 메시지·포트 검증 로직(`Host` 헤더 검사 등)도 전부 코드 줄 번호 근거와 함께 적었고, 포트 충돌·버전 범위 밖 같은 시나리오는 "코드로만 확인, 실행 안 함"이라고 명시해 "확인했다고 적었지만 실제로는 안 한 것"이 되지 않게 했습니다. 기존 문서(`CONNECTION_TROUBLESHOOT.md`)에는 없던 실제 오류 코드(`HOST_REJECTED`/`QUERY_REJECTED`/`ORIGIN_REJECTED`, `src/server.mjs:357,359-361`)를 코드 조사로 발견해, 그 문서를 고치는 대신 새로 쓴 `STUDENT_RUNBOOK.md`의 장애 표에 담았습니다(`CONNECTION_TROUBLESHOOT.md` 자체는 이번 작업에서 수정하지 않았습니다 — 22단계 재현 검증 때 `ORIGIN_REJECTED` 한 줄이 처음엔 빠져 있던 걸 추가로 발견해 보완했습니다).
 
 ### 무엇을 만들었나
 

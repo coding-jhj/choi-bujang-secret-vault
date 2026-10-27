@@ -853,7 +853,8 @@ export function classifyPcResult(result, now = Date.now()) {
     return { status: 'failed', code: 'PC_SHAPE_UNVERIFIED' };
   }
   if (Math.abs(now - measured) > PC_MAX_AGE_MS) return { status: 'failed', code: 'PC_MEASUREMENT_STALE' };
-  return { status: 'ok', measuredAt: data.measuredAt, metrics: data.metrics };
+  // run: 같은 응답의 meta 에서 읽은 실행 형태(카드②가 쓴다). 형식·시각 검사를 통과한 응답에서만 읽는다.
+  return { status: 'ok', measuredAt: data.measuredAt, metrics: data.metrics, run: readRunMode(result.meta) };
 }
 
 const PC_FAILURE_TEXT = {
@@ -865,14 +866,16 @@ const PC_FAILURE_TEXT = {
   NETWORK_ERROR: '로컬 서버에 연결할 수 없습니다.',
 };
 
-// 카드 상태 → 지표 5개의 표시. ok 가 아니면 모든 배지를 알수없음으로 둔다.
+// 카드 상태 → 지표 하나의 표시. ok 가 아니면 배지를 알수없음으로 둔다.
+function pcViewFor(spec, pc) {
+  return pc?.status === 'ok'
+    ? pcMetricView(spec, pc.metrics[spec.key])
+    : { display: describeStatus(undefined), value: pc?.status === 'loading' ? '확인 중' : '확인 불가', attention: null };
+}
+
+// 카드 상태 → 지표 5개의 표시.
 export function pcSafetyViews(pc) {
-  return PC_METRICS.map((spec) => ({
-    spec,
-    ...(pc?.status === 'ok'
-      ? pcMetricView(spec, pc.metrics[spec.key])
-      : { display: describeStatus(undefined), value: pc?.status === 'loading' ? '확인 중' : '확인 불가', attention: null }),
-  }));
+  return PC_METRICS.map((spec) => ({ spec, ...pcViewFor(spec, pc) }));
 }
 
 // 한 줄 답. 어떤 경우에도 「안전함」이라고 쓰지 않는다.
@@ -964,10 +967,213 @@ function renderPcSafetyCard(pc, detailOpen, { onCheck, onToggle }) {
   return card;
 }
 
+// ---------------------------------------------------------------------------
+// 카드② 「연결들은 믿을 수 있나?」 — renderAiConnection 칸. 17단계 AI 연결 표시(renderAiConnectionSection)는
+// 바꾸지 않고 그대로 안에 넣고, 서로 다른 연결 세 가지를 따로 나눠 보여 준다.
+//  1) AI 게이트웨이 연결: 제공 화면의 AI 연결 점검 결과(renderAiConnection 입력)만 쓴다.
+//  2) 실제 회사 시스템(SDP) 연결: /api/pc/status 응답 meta 의 실행 형태(mode·uiMode)만 쓴다.
+//     서버는 모든 응답 meta.mode 와 /api/diagnostics engine.mode 에 같은 값(src/server.mjs 의 mode)을 쓴다.
+//     connected 는 「연결 어댑터와 함께 실행 중」일 뿐 지금 회사 시스템이 이 PC를 받아들였다는 확인이 아니다.
+//     SDP 연결은 선택 설정이며 AI 연결 점검의 전제가 아니므로, 연결 안 함을 고장으로 쓰지 않는다.
+//  3) 이 PC의 네트워크·방화벽: 카드①과 같은 /api/pc/status 조회 결과(같은 pc 상태)를 함께 쓴다. 따로 조회하지 않는다.
+// 외부 서비스(GitHub·Vercel·Railway·Supabase)는 조회하지 않는다. 참고 사례도 외부 요청 없이 「연결 전 · 확인 불가」만 보이므로
+// 이 카드는 그 사실을 상세에 한 줄로만 적고 예시 값을 쓰지 않는다.
+// 어떤 경우에도 「믿을 수 있음」·「안전함」이라고 쓰지 않는다.
+// ---------------------------------------------------------------------------
+const RUN_UNKNOWN = Object.freeze({ mode: 'unknown', localPc: false });
+const RUN_MODES = ['connected', 'demo', 'disconnected'];
+
+// 서버가 보낸 meta 의 실행 형태. 시각이 없거나(브라우저가 만든 실패 응답) 값·조합이 계약과 다르면 확인 불가.
+export function readRunMode(meta) {
+  if (!isPlainRecord(meta) || typeof meta.checkedAt !== 'string' || !Number.isFinite(Date.parse(meta.checkedAt))) return RUN_UNKNOWN;
+  if (!RUN_MODES.includes(meta.mode)) return RUN_UNKNOWN;
+  const localPc = meta.mode === 'disconnected' && meta.uiMode === 'local-pc';
+  if (Object.hasOwn(meta, 'uiMode') && !localPc) return RUN_UNKNOWN;
+  return Object.freeze({ mode: meta.mode, localPc });
+}
+
+const NETWORK_SPEC = { key: 'network', name: '네트워크', read: (m) => (isCount(m.interfaceCount) && isCount(m.ipv4Count) && !(m.interfaceCount === 0 && m.ipv4Count > 0)
+  ? { value: `주소가 있는 외부 네트워크 장치 ${m.interfaceCount}개 · IPv4 주소 ${m.ipv4Count}개`,
+    attention: m.interfaceCount === 0 ? '주소가 있는 네트워크 장치가 없습니다. AI 게이트웨이·회사 시스템 연결이 되지 않을 수 있습니다.' : null,
+    pill: `장치 ${m.interfaceCount}개` }
+  : null) };
+const FIREWALL_SPEC = PC_METRICS.find((spec) => spec.key === 'firewall');
+
+// AI 점검 오류 코드 → describeStatus 사유. 목록에 없는 코드는 조회실패로 둔다(측정됨이 되지 않는다).
+const AI_ERROR_REASON = Object.assign(Object.create(null), {
+  CANCELLED: 'cancelled', WB_CLCO_CANCELLED: 'cancelled', REQUEST_CANCELLED: 'cancelled',
+  TIMEOUT: 'timeout', REQUEST_TIMEOUT: 'timeout', ENGINE_TIMEOUT: 'timeout', WB_CLCO_TIMEOUT: 'timeout',
+  WB_CLCO_AUTH_REQUIRED: 'permission_denied', WB_CLCO_ACCESS_BLOCKED: 'permission_denied',
+  ON_AI_AUTHORIZATION_CHANGED: 'permission_denied', ON_AI_PROVISIONING_PENDING: 'permission_denied',
+  ON_AI_INVALID_OUTPUT: 'invalid_response', AI_REQUEST_UNVERIFIED: 'invalid_response', SUBJECT_SCOPE_UNVERIFIED: 'invalid_response',
+});
+
+export function aiGatewayView({ status, mode, data, error } = {}) {
+  const unknown = (value, pill) => ({ display: describeStatus(undefined), value, attention: null, pill });
+  if (status === 'idle') return unknown('아직 점검하지 않았습니다. 제공 카드의 「AI 연결 점검」을 직접 누르세요.', '점검 전');
+  if (status === 'loading') return unknown('점검 중', '점검 중');
+  if (status === 'error') {
+    const code = typeof error?.code === 'string' ? error.code : 'UNKNOWN_ERROR';
+    const guidance = Object.hasOwn(AI_CONNECTION_ERROR_GUIDANCE, code) ? AI_CONNECTION_ERROR_GUIDANCE[code] : AI_CONNECTION_ERROR_GUIDANCE.AI_REQUEST_UNVERIFIED;
+    return { display: describeStatus('unavailable', AI_ERROR_REASON[code] ?? 'query_failed'), value: `점검 실패(${code}). ${guidance}`, attention: null, pill: '점검 실패' };
+  }
+  if (status !== 'ok' || !isPlainRecord(data) || !Object.hasOwn(AUDIENCE_AUTHORIZATION_LABEL, data.audienceAuthorization) || !isCount(data.modelCount)) {
+    return unknown('점검 결과 형식을 확인할 수 없습니다 — 연결됨으로 보지 않습니다', '확인 불가');
+  }
+  const notes = [];
+  if (data.audienceAuthorization === 'test') notes.push('시험 연결 점검(test)이며 실제 앱 권한 확인이 아닙니다.');
+  if (data.transportChecked !== true) notes.push('전송 확인이 되지 않았습니다.');
+  if (data.modelCount === 0) notes.push('응답한 모델이 없습니다.');
+  if (mode === 'demo') notes.push('예제 응답(demo)이며 실제 게이트 수용이 아닙니다.');
+  return {
+    display: describeStatus('ok'),
+    value: `${labelOf(AUDIENCE_AUTHORIZATION_LABEL, data.audienceAuthorization)} · 응답 모델 ${data.modelCount}개 · 모델 목록 점검이며 사건 설명은 실행하지 않음`,
+    attention: notes.length ? notes.join(' ') : null,
+    pill: data.audienceAuthorization === 'test' ? '시험 점검' : '권한 확인 점검',
+  };
+}
+
+export function sdpRunView(pc) {
+  if (pc?.status === 'loading') return { display: describeStatus(undefined), value: '확인 중', attention: null, pill: '확인 중' };
+  if (pc?.status !== 'ok') {
+    return { display: describeStatus(undefined), value: pc?.status === 'idle' ? '아직 확인하지 않았습니다. 「연결 상태 확인」을 누르세요.' : '이번 조회를 확인하지 못해 실행 형태를 알 수 없습니다 — 연결됨으로도 연결 안 함으로도 보지 않습니다', attention: null, pill: '확인 불가' };
+  }
+  const run = pc.run ?? RUN_UNKNOWN;
+  if (run.mode === 'connected') {
+    return { display: describeStatus('ok'), pill: '연결 설정됨', attention: null,
+      value: '이 앱 서버가 회사 시스템 연결 어댑터(SDP host 설정 등)와 함께 실행 중입니다(connected). 설정이 있다는 뜻이며, 지금 회사 시스템이 이 PC를 받아들였다는 확인은 아닙니다. 실제 수용 여부는 「현재 로그인」·「접속 판정」 결과로 봅니다.' };
+  }
+  if (run.mode === 'demo') {
+    return { display: describeStatus('ok'), pill: '예제 자료', attention: '예제 자료(demo)로 실행 중입니다. 실제 회사 시스템 연결이 아닙니다.',
+      value: '이 앱 서버가 예제 자료로 실행 중입니다(demo). 회사 시스템(SDP) 연결은 없습니다.' };
+  }
+  if (run.mode === 'disconnected') {
+    return { display: describeStatus('ok'), pill: '연결 안 함', attention: null,
+      value: `이 PC는 회사 시스템(SDP)에 연결하지 않고 실행 중입니다(disconnected). 고장이나 누락이 아닙니다.${run.localPc ? ' 서버가 PC 전용 실행 표시(local-pc)를 보냈습니다. 제공 화면이 PC 전용 실행으로 확정하면 AI 연결 점검 버튼도 막힙니다.' : ''}` };
+  }
+  return { display: describeStatus(undefined), value: '실행 형태 값을 확인할 수 없습니다 — 연결됨으로도 연결 안 함으로도 보지 않습니다', attention: null, pill: '확인 불가' };
+}
+
+// 요약 지표 4개(접근성 기준 5~6개 이내). AI 게이트웨이와 회사 시스템은 항상 따로 센다.
+export function connectionViews(ai, pc) {
+  return [
+    { key: 'ai-gateway', name: 'AI 게이트웨이', ...aiGatewayView(ai) },
+    { key: 'sdp', name: '회사 시스템(SDP)', ...sdpRunView(pc) },
+    { key: 'network', name: NETWORK_SPEC.name, ...pcViewFor(NETWORK_SPEC, pc) },
+    { key: 'firewall', name: FIREWALL_SPEC.name, ...pcViewFor(FIREWALL_SPEC, pc) },
+  ];
+}
+
+// 한 줄 답. 어떤 경우에도 「믿을 수 있음」이라고 쓰지 않는다.
+export function connectionTrustAnswer(views, ai, pc) {
+  if (ai?.status === 'idle' && pc?.status === 'idle') {
+    return '아직 확인하지 않았습니다(확인 불가). AI 게이트웨이는 제공 카드의 「AI 연결 점검」, 회사 시스템 실행 형태와 PC 네트워크·방화벽은 「연결 상태 확인」으로 따로 확인합니다.';
+  }
+  const measured = views.filter((v) => v.display.state === 'ok').length;
+  const unknown = views.length - measured;
+  const attention = views.filter((v) => v.attention).length;
+  const head = `실측 ${measured}/${views.length}${unknown ? ` · 확인 불가 ${unknown}개` : ''} · 주의 관찰 ${attention}건`;
+  if (attention) return `${head} — 주의할 관찰이 있습니다. 「상세 보기」에서 확인하세요.`;
+  if (unknown) return `${head} — 확인하지 못한 연결이 있어 믿을 수 있는지 판단할 수 없습니다.`;
+  return `${head} — 읽은 항목에서 주의 관찰은 없지만, 이것만으로 연결을 믿을 수 있다고 판정하지 않습니다.`;
+}
+
+function connectionBlock(key, title, note) {
+  const block = document.createElement('section');
+  block.className = 'event-block';
+  block.dataset.studentConnection = key;
+  block.appendChild(textEl('h4', title));
+  const noteEl = textEl('p', note);
+  noteEl.className = 'muted';
+  block.appendChild(noteEl);
+  return block;
+}
+
+function renderConnectionTrustCard(ai, pc, detailOpen, { onCheck, onToggle }) {
+  const card = document.createElement('section');
+  card.className = 'event';
+  card.dataset.studentConnectionTrust = pc?.status ?? 'unknown';
+  card.appendChild(textEl('h3', '연결들은 믿을 수 있나?'));
+
+  const views = connectionViews(ai, pc);
+  card.appendChild(textEl('p', connectionTrustAnswer(views, ai, pc)));
+
+  const pills = document.createElement('ul');
+  pills.className = 'plain-list';
+  for (const view of views) {
+    const li = document.createElement('li');
+    li.dataset.studentConnectionMetric = view.key;
+    li.appendChild(textEl('span', view.pill ? `${view.name} · ${view.pill}` : view.name));
+    const right = document.createElement('span');
+    right.appendChild(statusBadge(view.display));
+    if (view.attention) right.appendChild(textEl('span', ' 주의'));
+    li.appendChild(right);
+    pills.appendChild(li);
+  }
+  card.appendChild(pills);
+
+  const actions = document.createElement('div');
+  actions.className = 'event-actions';
+  const loading = pc?.status === 'loading';
+  const check = textEl('button', loading ? '확인 중…' : '연결 상태 확인');
+  check.type = 'button';
+  check.className = 'btn';
+  if (loading) check.setAttribute('aria-disabled', 'true');
+  check.addEventListener('click', () => { if (!loading) onCheck(); });
+  actions.appendChild(check);
+  const toggle = textEl('button', detailOpen ? '상세 닫기' : '상세 보기');
+  toggle.type = 'button';
+  toggle.className = 'btn';
+  toggle.setAttribute('aria-expanded', detailOpen ? 'true' : 'false');
+  toggle.addEventListener('click', onToggle);
+  actions.appendChild(toggle);
+  card.appendChild(actions);
+
+  // ① AI 게이트웨이 연결: 17단계 표시를 그대로 둔다(항상 보임).
+  const aiBlock = connectionBlock('ai-gateway', '① AI 게이트웨이 연결 — 모델 응답 점검',
+    'ALEPH AI 게이트웨이까지의 연결입니다. 회사 시스템(SDP) 연결과 다른 연결이며, 한쪽 결과로 다른 쪽을 판단하지 않습니다.');
+  aiBlock.appendChild(renderAiConnectionSection(ai));
+  card.appendChild(aiBlock);
+
+  // ② 실제 회사 시스템(SDP) 연결: 별도 칸. 연결 안 함은 고장이 아니다.
+  const [, sdp, network, firewall] = views;
+  const sdpBlock = connectionBlock('sdp', '② 실제 회사 시스템(SDP) 연결 — AI 게이트웨이와 별개',
+    'SDP 연결은 담당자가 따로 안내하는 선택 설정이며, AI 게이트웨이 연결 점검의 전제 조건이 아닙니다.');
+  const sdpLine = document.createElement('p');
+  sdpLine.appendChild(statusBadge(sdp.display));
+  sdpLine.appendChild(textEl('span', ` ${sdp.value}`));
+  sdpBlock.appendChild(sdpLine);
+  if (sdp.attention) sdpBlock.appendChild(textEl('p', `주의: ${sdp.attention}`));
+  card.appendChild(sdpBlock);
+
+  if (detailOpen) {
+    const detail = connectionBlock('pc-network', '③ 이 PC의 네트워크·방화벽', '「내 PC 확인」과 같은 조회를 함께 씁니다. 이 칸이 따로 다시 조회하지 않습니다.');
+    detail.dataset.studentConnectionDetail = 'open';
+    const dl = document.createElement('dl');
+    dl.className = 'kv';
+    for (const view of [network, firewall]) {
+      dl.appendChild(textEl('dt', view.name));
+      const dd = document.createElement('dd');
+      dd.appendChild(statusBadge(view.display));
+      dd.appendChild(textEl('span', ` ${view.value}`));
+      if (view.attention) dd.appendChild(textEl('p', `주의: ${view.attention}`));
+      dl.appendChild(dd);
+    }
+    detail.appendChild(dl);
+    if (pc?.status === 'ok') detail.appendChild(textEl('p', `측정 시각: ${pc.measuredAt} · 출처: 이 PC(local-pc)`));
+    if (pc?.status === 'failed') detail.appendChild(textEl('p', `조회 실패: ${PC_FAILURE_TEXT[pc.code] ?? '응답을 확인할 수 없습니다.'} (코드: ${pc.code}). 이전 값을 현재 상태로 쓰지 않습니다.`));
+    detail.appendChild(textEl('p', '장치 수와 방화벽 켜짐은 연결 신뢰 판정이 아닙니다. 지금 어떤 네트워크(회사·공용 Wi-Fi)에 붙어 있는지, 인터넷이 되는지는 이 조회에 들어 있지 않습니다. 앱은 설정을 바꾸지 않습니다.'));
+    detail.appendChild(textEl('p', '외부 서비스(GitHub·Vercel·Railway·Supabase) 연결은 이 카드에서 조회하지 않습니다: 연결 전 · 확인 불가. 조회하지 않은 연결을 정상으로 보지 않습니다.'));
+    card.appendChild(detail);
+  }
+  return card;
+}
+
 export function createStudentView({ api, onChange } = {}) {
   let pc = { status: 'idle' };
   let pcGeneration = 0;
   let pcDetailOpen = false;
+  let connectionDetailOpen = false;
 
   // 버튼을 누를 때만 한 번 읽는다. 늦게 온 이전 응답은 버린다. 예외도 실패(확인 불가)로 처리한다.
   async function checkPc() {
@@ -996,7 +1202,13 @@ export function createStudentView({ api, onChange } = {}) {
       return container;
     },
     renderVulnerabilities(input) { return renderVulnerabilitiesSection(input ?? {}); },
-    renderAiConnection(input) { return renderAiConnectionSection(input ?? {}); },
+    // 카드②: 카드①과 같은 pc 상태·checkPc 를 함께 쓴다(같은 경로를 두 번 조회하지 않는다).
+    renderAiConnection(input) {
+      return renderConnectionTrustCard(input ?? {}, pc, connectionDetailOpen, {
+        onCheck: () => { void checkPc(); },
+        onToggle: () => { connectionDetailOpen = !connectionDetailOpen; notify(onChange); },
+      });
+    },
     renderExplanation(input) { return renderExplanationSection(input ?? {}); },
     renderAction(input) { return renderActionSection(input ?? {}); },
   };

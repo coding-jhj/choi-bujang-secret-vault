@@ -734,6 +734,42 @@ function renderVulnerabilitiesSection({ status, mode, data, error } = {}) {
   return container;
 }
 
+// ---------------------------------------------------------------------------
+// 공통 상태 표시(상태 이름표). 이후 기능 카드가 모두 이 함수 하나로 상태 배지를 그린다.
+// 실제 /api/pc/status 응답 모양(src/pc-status.mjs)을 그대로 따른다: 지표마다
+// {state:'ok', ...값} 아니면 {state:'unavailable', reason} 중 하나이며, reason은
+// permission_denied / query_failed / invalid_response / invalid_sample /
+// unsupported / timeout / cancelled 7가지뿐이다(src/pc-status.mjs 실제 호출부 확인).
+// 색만으로 구분하지 않는다: 한국어 이름 + 기호 + 색을 함께 쓴다(색각 차이·흑백 인쇄 대비).
+// 색은 흰 배경 글자색 기준 대비 4.5:1 이상으로 골랐다.
+// state==='ok'이면서 reason이 없을 때, 또는 state==='unavailable'이면서 reason이 위
+// 7가지 중 하나와 정확히 일치할 때만 정상 표시를 인정한다. 그 외(대소문자·공백이
+// 다르거나 문자열이 아니거나 목록에 없거나, 'ok'인데 reason이 섞여 들어온 경우 등)는
+// 전부 절대 '정상'으로 보이지 않도록 '알수없음'(known:false)으로 돌려준다.
+// 이 파일 하나만 서빙되므로(/student/extension.mjs) 별도 파일로 나누지 않는다.
+// ---------------------------------------------------------------------------
+const OK_DISPLAY = Object.freeze({ state: 'ok', reason: null, label: '정상', color: '#1a7f37', symbol: '✓', known: true });
+
+const UNAVAILABLE_REASON_DISPLAY = Object.freeze(Object.assign(Object.create(null), {
+  permission_denied: Object.freeze({ state: 'unavailable', reason: 'permission_denied', label: '권한없음', color: '#bc4c00', symbol: '⊘', known: true }),
+  query_failed: Object.freeze({ state: 'unavailable', reason: 'query_failed', label: '조회실패', color: '#cf222e', symbol: '✕', known: true }),
+  invalid_response: Object.freeze({ state: 'unavailable', reason: 'invalid_response', label: '응답오류', color: '#bf3989', symbol: '▲', known: true }),
+  invalid_sample: Object.freeze({ state: 'unavailable', reason: 'invalid_sample', label: '표본오류', color: '#8250df', symbol: '◆', known: true }),
+  unsupported: Object.freeze({ state: 'unavailable', reason: 'unsupported', label: '미지원', color: '#57606a', symbol: '∅', known: true }),
+  timeout: Object.freeze({ state: 'unavailable', reason: 'timeout', label: '시간초과', color: '#9a6700', symbol: '◷', known: true }),
+  cancelled: Object.freeze({ state: 'unavailable', reason: 'cancelled', label: '취소됨', color: '#0969da', symbol: '■', known: true }),
+}));
+
+const UNKNOWN_STATUS_DISPLAY = Object.freeze({ state: 'unknown', reason: null, label: '알수없음', color: '#24292f', symbol: '!', known: false });
+
+export function describeStatus(state, reason) {
+  if (state === 'ok' && reason === undefined) return OK_DISPLAY;
+  if (state === 'unavailable' && typeof reason === 'string' && Object.hasOwn(UNAVAILABLE_REASON_DISPLAY, reason)) {
+    return UNAVAILABLE_REASON_DISPLAY[reason];
+  }
+  return UNKNOWN_STATUS_DISPLAY;
+}
+
 export function createStudentView({ onChange } = {}) {
   return {
     renderIdentity(input) { return renderIdentitySection(input); },

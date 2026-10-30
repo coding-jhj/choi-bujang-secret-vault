@@ -1218,3 +1218,48 @@ npm --prefix on-client run check
 (기록 없음 — 아직 판정 피드백을 받지 않았습니다.)
 
 **다시 실행하는 방법:** `git clone` 후 `on-client/docs/STUDENT_RUNBOOK.md` 1절부터 순서대로. 종료 확인 시 `netstat -ano | findstr <포트>`로 실제 PID가 남아있는지 반드시 재확인.
+
+---
+
+## 마지막 총공세 보너스 단계: PC 대시보드 화면 다듬기 + 직접 검증 (22단계 이후, 공식 채점 대상 아님)
+
+과정 자체 "권장 제작 기간"(2026-10-26~11-06, `on-client/docs/FINAL_PRODUCT_GUIDE.md` §10) 중 작업. 23단계로 세지 않으며, 이 구간의 채택 기준은 "제안, 채택 전"(`STUDENT_PROMPTS.md:618`)이라 판정 요청 대상이 아닙니다. 13~22단계와 달리 공식 채점이 없고, 아래는 학생 자체 기록입니다.
+
+### 막은 공격
+
+- 카드②("연결들은 믿을 수 있나?")의 "상세 보기" 토글이 펼치는 블록이 버튼과 멀리 떨어진 화면 끝에 붙어 있던 구조를 WAI-ARIA APG Disclosure 패턴에 맞게 토글 버튼 바로 뒤로 옮겼습니다. 버튼과 그 버튼이 펼치는 내용이 떨어져 있으면, 특히 스크린리더 사용자가 "눌렀는데 뭐가 바뀐 건지" 알기 어렵습니다.
+- 다시 그려질 때(조회·토글마다 DOM 전체가 `replaceChildren`으로 교체됨, `public/app.js` `renderAllStudent`) 키보드 포커스가 `document.body`로 떨어지는 문제를 `data-student-focus-key` 기반 복원 로직(`focusKey`/`rememberFocus`)으로 막았습니다 — 포커스 유실은 키보드만 쓰는 사용자에게 매 조작마다 위치를 다시 찾게 만드는 실사용성 결함입니다.
+- "직접 검증"(9번)에서 카드①②③과 공통 유틸 함수를 계약 밖 입력(명시적 `null`, `metrics` 누락, `views`가 배열이 아닌 경우)으로 adversarial 호출해, 실제 UI 경로로는 도달하지 않지만 존재하는 크래시 지점 3곳(`pcViewFor`, `aiGatewayView`, `connectionTrustAnswer`)을 찾아 방어 가드를 추가했습니다. 이 함수들은 `export`되어 있어 향후 다른 코드가 계약을 어기고 호출해도 죽지 않도록 선제 방어한 것입니다.
+
+### 무엇을 만들었나
+
+- **수정**: `on-client/student/extension.mjs`
+  - 공통: `focusKey`/`rememberFocus` 추가(초점 복원), 이벤트 상세·도움정보 복사·PC 확인 등 버튼에 `btn` 클래스 통일
+  - 오류 문구 4곳에서 "확인 불가"(서버 메시지 없음인 경우)와 "확인 불가"(그 외)가 섞여 있던 걸 "서버 메시지 없음"으로 구분
+  - 카드①③의 실패 사유 매핑에 `INVALID_RESPONSE`/`CANCELLED`/`CLIENT_ERROR` 코드 보강
+  - 카드②: 토글 상세 블록을 토글 버튼 바로 뒤로 재배치, 소제목 번호(①②③)를 바뀐 화면 순서에 맞게 재정렬
+  - 카드③ 토글 문구를 카드①②와 같은 "상세 보기/상세 닫기" 짝으로 통일
+  - 방어 가드 3곳: `pcViewFor`(`pc.metrics`가 plain record 아닐 때 `isPlainRecord` 가드 재사용), `aiGatewayView`(`ai`가 명시적 `null`이면 `ai ?? {}`로 정규화), `connectionTrustAnswer`(`views`가 배열이 아니면 `Array.isArray(X) ? X : []`로 정규화 — 파일 전역에서 이미 쓰는 패턴)
+- 공급 파일(`public/app.js`, `src/server.mjs` 등)은 수정하지 않음.
+- 커밋: `832df4c`(화면 다듬기), `4171993`(방어 가드 3곳).
+
+### 확인한 것 (실제로 실행한 결과)
+
+1. `node --check on-client/student/extension.mjs` 매 수정 후 실행, 전부 `exit 0`.
+2. 카드②의 토글-상세 DOM 순서를 실제 `createStudentView().renderAiConnection(...)` 호출로 검증(최소 DOM 스텁, jsdom 등 신규 의존성 없음) — 열림/닫힘 상태 양쪽에서 요소 순서와 소제목 번호가 화면 등장 순서와 일치함을 확인.
+3. adversarial 테스트 81건을 scratchpad의 node 스크립트로 실제 실행(저장소에 테스트 파일 추가 안 함) — 전부 PASS. 포함 내용: 실패 코드 9종 + 미정의/XSS형 코드, 필드 타입 오류(cpu가 문자열/NaN/음수 등), 25건 기록 투입 시 20건 제한·5건 요약, 토글 반복, `innerHTML` 미사용(XSS 방어), 계약 밖 입력(`null` 등) 3종.
+4. 방어 가드 적용 전후를 `git show HEAD:...`로 추출해 같은 입력으로 직접 비교 — 수정 전 실제로 `TypeError`가 던져지고 수정 후 던지지 않음을 실행으로 확인(추론이 아님).
+5. `git diff --stat`로 두 커밋 모두 `on-client/student/extension.mjs` 한 파일, 의도한 범위로만 제한됨을 확인.
+
+### 확인하지 못한 것
+
+- 실제 브라우저에서 스크린리더로 포커스 복원과 카드② 접근성 수정을 확인하지 않았습니다 — DOM 트리 순서 수준의 검증까지만 했습니다.
+- 10번(사용자 테스트, "다른 사람이 안내만 보고 따라 하기")은 학생이 직접 자가 체크리스트(`memory/user_test_checklist_10.md`, git 비추적)로 진행했고, 막힌 지점 없음으로 확인됐다는 구두 보고만 받았습니다 — 제3자 관찰 기록은 아닙니다.
+- 11~13번(포장·설치·제출 자료)은 진행하지 않기로 결정했습니다. 조사 결과 과정이 운영하는 설치형 포장(`.aleph-alekov-host` 호스트 런타임 + 서명 키)은 이 PC에 없고 운영자가 배포해야 하는 리소스이며, 과정 문서(`FINAL_PRODUCT_GUIDE.md §10`)가 이 기간 자체를 "감점 없는 권장 제작 기간"으로 명시해 필수 단계가 아님을 확인했습니다. 과정 포털에서 공식 배포받은 별도 도구(`keshev-portable-tools-0.1.1`)로 독립 실행형 포장이 가능해 보였으나, 실행(심지어 미리보기 모드)이 하네스 보안 정책으로 자동 차단되어 사용법만 문서로 정리하고 실행하지 않았습니다. 이후 학생이 포장 자체를 하지 않기로 결정했습니다.
+- 이 보너스 단계는 공식 판정 대상이 아니므로 AI 판정 결과가 없습니다.
+
+### 보완
+
+(기록 없음 — 판정 대상이 아니라 피드백 루프가 없습니다.)
+
+**다시 실행하는 방법:** `npm --prefix on-client run check`(구문 검사). adversarial 테스트는 이 세션의 scratchpad에만 있어 저장소에 재현 스크립트가 없습니다 — 필요하면 카드①②③ 함수를 `createStudentView()` 경유로 호출하는 최소 DOM 스텁을 다시 작성해야 합니다.

@@ -908,9 +908,11 @@ const PC_FAILURE_TEXT = {
 };
 
 // 카드 상태 → 지표 하나의 표시. ok 가 아니면 배지를 알수없음으로 둔다.
+// pc.metrics 자체가 계약과 다른 모양(없음·null·배열·원시값)이어도 pcMetricView 의
+// isPlainRecord(metric) 가드가 그대로 처리하도록, 여기서도 같은 가드로 값을 건넨다.
 function pcViewFor(spec, pc) {
   return pc?.status === 'ok'
-    ? pcMetricView(spec, pc.metrics[spec.key])
+    ? pcMetricView(spec, isPlainRecord(pc.metrics) ? pc.metrics[spec.key] : undefined)
     : { display: describeStatus(undefined), value: pc?.status === 'loading' ? '확인 중' : '확인 불가', attention: null };
 }
 
@@ -1083,7 +1085,11 @@ const AI_ERROR_REASON = Object.assign(Object.create(null), {
   ON_AI_INVALID_OUTPUT: 'invalid_response', AI_REQUEST_UNVERIFIED: 'invalid_response', SUBJECT_SCOPE_UNVERIFIED: 'invalid_response',
 });
 
-export function aiGatewayView({ status, mode, data, error } = {}) {
+// ai 가 null 로 직접 들어와도(계약 밖 호출) undefined 와 같이 다루도록 정규화한다.
+// 구조분해 매개변수의 기본값(= {})은 undefined 에만 적용되고 명시적 null 에는
+// 적용되지 않으므로, 본문 첫 줄에서 ?? 로 한 번 더 정규화한다.
+export function aiGatewayView(ai) {
+  const { status, mode, data, error } = ai ?? {};
   const unknown = (value, pill) => ({ display: describeStatus(undefined), value, attention: null, pill });
   if (status === 'idle') return unknown('아직 점검하지 않았습니다. 제공 카드의 「AI 연결 점검」을 직접 누르세요.', '점검 전');
   if (status === 'loading') return unknown('점검 중', '점검 중');
@@ -1140,14 +1146,17 @@ export function connectionViews(ai, pc) {
 }
 
 // 한 줄 답. 어떤 경우에도 「믿을 수 있음」이라고 쓰지 않는다.
+// views 가 배열이 아니면(null·undefined·객체·문자열 등, 실제 UI 경로로는 도달하지 않는 계약 밖 호출) 빈 배열로
+// 다뤄 아래 .filter 호출이 죽지 않게 한다.
 export function connectionTrustAnswer(views, ai, pc) {
+  const safeViews = Array.isArray(views) ? views : [];
   if (ai?.status === 'idle' && pc?.status === 'idle') {
     return '아직 확인하지 않았습니다(확인 불가). AI 게이트웨이는 제공 카드의 「AI 연결 점검」, 회사 시스템 실행 형태와 PC 네트워크·방화벽은 「연결 상태 확인」으로 따로 확인합니다.';
   }
-  const measured = views.filter((v) => v.display.state === 'ok').length;
-  const unknown = views.length - measured;
-  const attention = views.filter((v) => v.attention).length;
-  const head = `실측 ${measured}/${views.length}${unknown ? ` · 확인 불가 ${unknown}개` : ''} · 주의 관찰 ${attention}건`;
+  const measured = safeViews.filter((v) => v.display.state === 'ok').length;
+  const unknown = safeViews.length - measured;
+  const attention = safeViews.filter((v) => v.attention).length;
+  const head = `실측 ${measured}/${safeViews.length}${unknown ? ` · 확인 불가 ${unknown}개` : ''} · 주의 관찰 ${attention}건`;
   if (attention) return `${head} — 주의할 관찰이 있습니다. 「상세 보기」에서 확인하세요.`;
   if (unknown) return `${head} — 확인하지 못한 연결이 있어 믿을 수 있는지 판단할 수 없습니다.`;
   return `${head} — 읽은 항목에서 주의 관찰은 없지만, 이것만으로 연결을 믿을 수 있다고 판정하지 않습니다.`;

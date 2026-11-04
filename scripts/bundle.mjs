@@ -44,7 +44,7 @@ try {
     fail('aleph.config.json의 repoUrl이 Git origin 주소와 다릅니다. 같은 저장소 주소로 맞춰 주세요.');
   }
   const notes = JSON.parse(readFileSync(join(root, 'bundle-notes.json'), 'utf8'));
-  if (!Number.isInteger(config.step) || config.step < 1 || config.step > 12) fail('aleph.config.json의 step을 확인해 주세요.');
+  if (!Number.isInteger(config.step) || config.step < 1 || config.step > 22) fail('aleph.config.json의 step을 확인해 주세요.');
   if (config.step >= 3 && (!config.identityProvider || typeof config.identityProvider !== 'object'
       || ['issuer', 'audience', 'jwksUrl'].some((key) => typeof config.identityProvider[key] !== 'string'
         || !config.identityProvider[key].trim()))) {

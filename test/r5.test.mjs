@@ -21,6 +21,19 @@ const env = {
   VERCEL_URL: 'student-defense-123.vercel.app',
 };
 
+test('build identity accepts steps up to 22 and rejects out-of-range steps', () => {
+  const full = {
+    ...config,
+    step: 22,
+    allowedRoutes: ['GET /api/notes'],
+    restoreRoute: 'POST /api/notes/:id/restore',
+  };
+  assert.equal(deploymentIdentity(env, full).step, 22);
+  assert.equal(deploymentIdentity(env, { ...full, step: 13 }).step, 13);
+  assert.throws(() => deploymentIdentity(env, { ...full, step: 23 }));
+  assert.throws(() => deploymentIdentity(env, { ...full, step: 0 }));
+});
+
 test('build identity uses Vercel Git and deployment metadata', () => {
   assert.deepEqual(deploymentIdentity(env, config), {
     schema: 'aleph.defense.deployment.v1',

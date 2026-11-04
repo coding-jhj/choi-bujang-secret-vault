@@ -19,11 +19,12 @@ communication style and the senior bar. Nothing here relaxes it.
 
 Code > `docs/DECIDER_REQUEST.md` contract > step records (`docs/STAGE_LOG.md`,
 formerly README) (can drift).
-Verify against code before citing. Doc drift found so far:
+Verify against code before citing. Doc drift fixed so far:
 
-- `docs/STAGE_LOG.md` preamble says attack-check reads `/data.json`
-  for 0 memos; code only checks for 404.
-- `.gitignore` lists `public/supabase.js`, which is no longer built.
+- `docs/STAGE_LOG.md` preamble now says attack-check only checks that
+  `/data.json` is not served (404).
+- `.gitignore` keeps `public/supabase.js` on purpose (no longer built; guards
+  stale checkouts) and says so in a comment.
 
 ## 3. Hard constraints
 

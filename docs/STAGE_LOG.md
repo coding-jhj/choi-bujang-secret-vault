@@ -20,7 +20,7 @@
 
 `aleph.config.json`의 `repoUrl`과 `publicAppUrl`은 이전 제출 묶음 방식의 자리표시자입니다. 1단계에서는 학생이 편집하지 않습니다. 2단계 이후 코딩 도구가 필요한 설정과 보호 기능을 단계별로 작성합니다. `npm run bundle`과 `bundle-notes.json`도 1단계의 세 걸음에는 포함되지 않습니다.
 
-로컬에서 화면만 확인할 때는 `npm run build -- --local`을 사용합니다. 로컬 실행은 Vercel 배포나 심판 접수를 증명하지 않습니다. `src/attack-check.mjs`는 실제 배포 주소의 `/data.json`을 비로그인으로 요청해 가상 메모가 0건인지 읽습니다.
+로컬에서 화면만 확인할 때는 `npm run build -- --local`을 사용합니다. 로컬 실행은 Vercel 배포나 심판 접수를 증명하지 않습니다. `src/attack-check.mjs`는 배포 주소의 `/data.json`을 비로그인 GET으로 요청해 열리지 않는지(404)만 확인합니다. 메모 개수는 읽지 않습니다.
 
 ## 다음 단계의 코딩 도구에 전달할 규칙
 
